@@ -16,6 +16,11 @@ module.exports = (sequelize) => {
     price: Sequelize.STRING,
 
     quantity: Sequelize.FLOAT,
+    deficit: {
+      type: Sequelize.FLOAT,
+      allowNull: false,
+      defaultValue: 0,
+    },
     isCreatedMenedger: Sequelize.BOOLEAN,
     createdAt: {
       type: Sequelize.DATE,

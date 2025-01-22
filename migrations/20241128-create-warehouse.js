@@ -20,7 +20,7 @@ module.exports = {
         allowNull: false,
       },
       weight: Sequelize.STRING,
-      quantity: Sequelize.STRING,
+      quantity: Sequelize.FLOAT,
       defective: Sequelize.STRING,
 
       createdAt: {

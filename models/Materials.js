@@ -15,7 +15,7 @@ module.exports = (sequelize) => {
     priceM2: Sequelize.STRING,
     price: Sequelize.STRING,
     weight: Sequelize.STRING,
-    quantity: Sequelize.STRING,
+    quantity: Sequelize.FLOAT,
     defective: Sequelize.STRING,
     isCreateMenedger: Sequelize.BOOLEAN,
 

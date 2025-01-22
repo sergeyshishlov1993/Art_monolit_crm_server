@@ -23,6 +23,7 @@ module.exports = {
       name: Sequelize.STRING,
       price: Sequelize.STRING,
       quantity: Sequelize.FLOAT,
+      deficit: Sequelize.FLOAT,
       isCreatedMenedger: Sequelize.BOOLEAN,
 
       createdAt: {

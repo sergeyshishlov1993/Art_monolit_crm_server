@@ -23,7 +23,7 @@ module.exports = (sequelize) => {
       defaultValue: 0,
     },
     weight: Sequelize.STRING,
-    quantity: Sequelize.STRING,
+    quantity: Sequelize.FLOAT,
     defective: Sequelize.STRING,
 
     createdAt: {

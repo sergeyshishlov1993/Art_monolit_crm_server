@@ -14,7 +14,7 @@ module.exports = {
         price: "10",
         earnings: 15.5,
         weight: "500",
-        quantity: "100",
+        quantity: 1,
         defective: "0",
 
         createdAt: new Date(),
@@ -30,7 +30,7 @@ module.exports = {
         price: "15",
         earnings: 20,
         weight: "800",
-        quantity: "50",
+        quantity: 5,
         defective: "5",
 
         createdAt: new Date(),
