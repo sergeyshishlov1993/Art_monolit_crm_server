@@ -8,7 +8,7 @@ module.exports = {
         parentId: "123e4567-e89b-12d3-a456-426614174000",
         name: "Work A",
         price: "200.00",
-
+        parentTitle: "На плите",
         createdAt: new Date(),
         updatedAt: new Date(),
       },

@@ -13,7 +13,7 @@ module.exports = (sequelize) => {
     },
     name: Sequelize.STRING,
     price: Sequelize.STRING,
-
+    parentTitle: Sequelize.STRING,
     createdAt: {
       type: Sequelize.DATE,
       allowNull: false,

@@ -20,7 +20,7 @@ module.exports = {
       },
       name: Sequelize.STRING,
       price: Sequelize.STRING,
-
+      parentTitle: Sequelize.STRING,
       createdAt: Sequelize.DATE,
       updatedAt: Sequelize.DATE,
     });

@@ -52,6 +52,18 @@ module.exports = (sequelize) => {
       onDelete: "CASCADE",
       onUpdate: "CASCADE",
     });
+
+    Orders.hasMany(models.OrderStatuses, {
+      foreignKey: "parentId",
+      onDelete: "CASCADE",
+      onUpdate: "CASCADE",
+    });
+
+    Orders.hasMany(models.OrderPhotoLinks, {
+      foreignKey: "parentId",
+      onDelete: "CASCADE",
+      onUpdate: "CASCADE",
+    });
   };
 
   return Orders;

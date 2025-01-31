@@ -2,33 +2,41 @@ const { Router } = require("express");
 const TelegramBot = require("node-telegram-bot-api");
 const router = Router();
 const { models } = require("../models/index");
-const { v4: uuidv4 } = require("uuid");
+const multer = require("multer");
+const s3 = require("../s3Config");
+
 const {
   Orders,
   OrderDeads,
   OrderMaterials,
   OrderWorks,
   OrderServices,
+  OrderStatuses,
   Warehouse,
   Materials,
+  OrderPhotoLinks,
 } = models;
 
 const { Op } = require("sequelize");
-const botStatusToken = "8162606893:AAEBI9zyxJ65SDAJAcYzPRDyXXbyuaWYkac";
-const botOrdersTokken = "7983082460:AAGjnK4UrVeN8eNDKm0bQoFu0itVRxQ1-sE";
-const botWarehouseToken = "7740212030:AAGOnzCMvqJrJkyrg3YpuQC7SrG7icJfuTE";
-const bot = new TelegramBot(botStatusToken, { polling: true });
-const botOrders = new TelegramBot(botOrdersTokken, { polling: true });
-const botWarehouse = new TelegramBot(botWarehouseToken, { polling: true });
+const upload = multer({ storage: multer.memoryStorage() });
 
+//TELEGRAM BOTS
+const botStatusToken = "8162606893:AAEBI9zyxJ65SDAJAcYzPRDyXXbyuaWYkac";
+const botStatus = new TelegramBot(botStatusToken, { polling: true });
 const statusChatIds = new Set();
+
+const botOrdersTokken = "7983082460:AAGjnK4UrVeN8eNDKm0bQoFu0itVRxQ1-sE";
+const botOrders = new TelegramBot(botOrdersTokken, { polling: true });
 const orderChatIds = new Set();
+
+const botWarehouseToken = "7819287579:AAFX0VMVwXNI-nequ_R69KGGIUofv6j-Dro";
+const botWarehouse = new TelegramBot(botWarehouseToken, { polling: true });
 const warehouseChatIds = new Set();
 
-bot.onText(/\/start/, (msg) => {
+botStatus.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   statusChatIds.add(chatId);
-  bot.sendMessage(
+  botStatus.sendMessage(
     chatId,
     "👋 Добро пожаловать! Вы будете получать уведомления о статусах заказов."
   );
@@ -46,85 +54,32 @@ botOrders.onText(/\/start/, (msg) => {
 botWarehouse.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
 
-  warehouseChatIds.add(chatId);
+  if (!warehouseChatIds.has(chatId)) {
+    warehouseChatIds.add(chatId);
 
-  const welcomeMessage =
-    "👋 Добро пожаловать! Вы будете получать уведомления об остатках на складе.";
-  const replyMarkup = {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "Проверить остатки", callback_data: "check_stock" }],
-      ],
-    },
-  };
+    const welcomeMessage =
+      "👋 Добро пожаловать! Вы будете получать уведомления об остатках на складе.";
 
-  botWarehouse.sendMessage(chatId, welcomeMessage, replyMarkup);
-});
-
-botWarehouse.on("callback_query", async (query) => {
-  const chatId = query.message.chat.id;
-  const action = query.data;
-
-  if (action === "check_stock") {
-    try {
-      const lowStockItems = await Warehouse.findAll({
-        where: {
-          quantity: {
-            [Op.lt]: 5,
-          },
+    botWarehouse.sendMessage(chatId, welcomeMessage, {
+      reply_markup: {
+        remove_keyboard: true,
+        inline_keyboard: [],
+      },
+    });
+  } else {
+    botWarehouse.sendMessage(
+      chatId,
+      "Вы уже зарегистрированы для уведомлений.",
+      {
+        reply_markup: {
+          remove_keyboard: true,
         },
-      });
-
-      if (lowStockItems.length === 0) {
-        return botWarehouse.sendMessage(chatId, "✅ Все запасы в порядке!");
       }
-
-      const message = lowStockItems
-        .map(
-          (item) =>
-            `🛠 <b>${item.name}(${item.length}X${item.width}X${item.thickness})</b>\n` +
-            `Количество: ${item.quantity}\n\n`
-        )
-        .join("");
-
-      botWarehouse.sendMessage(
-        chatId,
-        `⚠️ <b>Товары с низким запасом:</b>\n\n${message}`,
-        { parse_mode: "HTML" }
-      );
-    } catch (error) {
-      console.error("Ошибка при проверке складских остатков:", error);
-      botWarehouse.sendMessage(
-        chatId,
-        "❌ Произошла ошибка при проверке остатков на складе."
-      );
-    }
+    );
   }
-
-  botWarehouse.answerCallbackQuery(query.id);
 });
 
-async function sendLowStockNotification(
-  materialName,
-  requiredQuantity,
-  availableQuantity,
-  missingQuantity
-) {
-  const message = `
-    ⚠️ <b>На складе заканчиваеться:</b> ${materialName}\n
-    📦 <b>Требуется:</b> ${requiredQuantity}\n
-    📦 <b>Доступно:</b> ${availableQuantity}\n
-    ❗️ <b>Нужно дозаказать:</b> ${missingQuantity}
-  `;
-
-  for (const chatId of warehouseChatIds) {
-    try {
-      await botWarehouse.sendMessage(chatId, message, { parse_mode: "HTML" });
-    } catch (error) {
-      console.error(`Ошибка отправки уведомления в чат ${chatId}:`, error);
-    }
-  }
-}
+//
 
 function selectStatus(key) {
   const statusOptions = {
@@ -144,19 +99,58 @@ function selectStatus(key) {
 
   return statusOptions[key];
 }
+async function createMissingMaterial(material, deficit, transaction) {
+  const existingMaterial = await Materials.findOne({
+    where: { name: material.name },
+    transaction,
+  });
 
-async function sendOrderUpdateMessage(message, type) {
-  const targetChatIds = type === "status" ? statusChatIds : orderChatIds;
+  if (!existingMaterial) {
+    await Materials.create(
+      {
+        id: material.id,
+        name: material.name,
+        length: material.length || null,
+        width: material.width || null,
+        thickness: material.thickness || null,
+        price: material.price || 0,
+        priceM2: material.priceM2,
+        weight: material.weight,
+        quantity: deficit,
+        isCreateMenedger: false,
+      },
+      { transaction }
+    );
+  } else {
+    existingMaterial.quantity += deficit;
 
-  for (const chatId of targetChatIds) {
-    try {
-      if (type === "status") {
-        await bot.sendMessage(chatId, message, { parse_mode: "HTML" });
-      } else {
-        await botOrders.sendMessage(chatId, message, { parse_mode: "HTML" });
-      }
-    } catch (error) {
-      console.error(`Ошибка отправки сообщения в чат ${chatId}:`, error);
+    await existingMaterial.save({ transaction });
+  }
+}
+async function createCustomMaterials(material, transaction) {
+  await Materials.create(
+    {
+      id: material.id,
+      name: material.name,
+      length: material.length || null,
+      width: material.width || null,
+      thickness: material.thickness || null,
+      price: material.price || 0,
+      priceM2: material.priceM2,
+      weight: material.weight,
+      quantity: material.quantity,
+      isCreateMenedger: false,
+    },
+    { transaction }
+  );
+}
+async function deleteCustomMaterials(orderMaterials, transaction) {
+  for (const material of orderMaterials) {
+    if (material.isCreatedMenedger) {
+      await Materials.destroy({
+        where: { name: material.name },
+        transaction,
+      });
     }
   }
 }
@@ -173,6 +167,21 @@ async function handleOrderDeads(orderDeads, parentId, transaction) {
     }
   }
 }
+async function sendLowStockNotification(materialName, requiredQuantity) {
+  const message = `
+    ⚠️ <b>На складе заканчиваеться:</b> ${materialName}\n 
+    ⚠️ <b>Остаток меньше :</b> ${requiredQuantity}\n 
+   
+  `;
+
+  for (const chatId of warehouseChatIds) {
+    try {
+      await botWarehouse.sendMessage(chatId, message, { parse_mode: "HTML" });
+    } catch (error) {
+      console.error(`Ошибка отправки уведомления в чат ${chatId}:`, error);
+    }
+  }
+}
 
 async function handleOrderMaterials(
   orderMaterials,
@@ -183,243 +192,111 @@ async function handleOrderMaterials(
   if (!orderMaterials || orderMaterials.length === 0) return;
 
   for (const material of orderMaterials) {
-    const { quantity = 1, ...rest } = material;
-    const isCreatedMenedger = material.isCreatedMenedger;
+    const { quantity = 1, warehouseId, ...rest } = material;
 
     const parsedQuantity = parseFloat(quantity) || 0;
-
     let previousQuantity = 0;
 
     if (isUpdate) {
-      previousQuantity = await getPreviousOrderQuantity(
-        parentId,
-        material.name
+      const oldOrderMaterials = await OrderMaterials.findAll({
+        where: { parentId },
+      });
+
+      if (oldOrderMaterials.length !== orderMaterials.length) {
+        const newMaterialIds = orderMaterials.map((item) => String(item.id));
+
+        const deletedMaterials = oldOrderMaterials.filter(
+          (oldMaterial) => !newMaterialIds.includes(String(oldMaterial.id))
+        );
+
+        await returnMaterialsToWarehouse(deletedMaterials);
+        await updateMaterialsDeficit(deletedMaterials);
+      }
+
+      if (oldOrderMaterials.length > 0) {
+        await returnMaterialsToWarehouse(oldOrderMaterials);
+        await updateMaterialsDeficit(orderMaterials);
+      } else {
+        console.log(
+          "NO OLD MATERIALS FOUND. SKIPPING RETURN AND DEFICIT UPDATE"
+        );
+      }
+    }
+
+    // Перевірка значення material перед виконанням операцій
+    if (!material.name || parsedQuantity <= 0) {
+      console.log(
+        `SKIPPING: Invalid material data - ${JSON.stringify(material)}`
       );
+      continue;
     }
 
-    const quantityDifference = parsedQuantity - previousQuantity;
+    if (material.isCreatedMenedger) {
+      await createCustomMaterials(material, transaction);
 
-    if (isCreatedMenedger) {
-      await processCustomMaterial(material, quantityDifference, transaction);
-    } else if (material.warehouseId) {
-      await processWarehouseMaterial(material, quantityDifference, transaction);
-    }
-
-    await OrderMaterials.upsert(
-      { ...rest, quantity: parsedQuantity, parentId },
-      { transaction }
-    );
-  }
-}
-
-async function getPreviousOrderQuantity(parentId, materialName) {
-  const existingOrderMaterial = await OrderMaterials.findOne({
-    where: { parentId, name: materialName },
-  });
-
-  if (!existingOrderMaterial) {
-    return 0;
-  }
-
-  const previousQuantity = parseFloat(existingOrderMaterial.quantity) || 0;
-
-  return previousQuantity;
-}
-
-async function processCustomMaterial(
-  material,
-  quantityDifference,
-  transaction
-) {
-  const existingMaterial = await Materials.findOne({
-    where: { name: material.name },
-    transaction,
-  });
-
-  if (!existingMaterial) {
-    await Materials.create(
-      {
-        name: material.name,
-        length: material.length || null,
-        width: material.width || null,
-        thickness: material.thickness || null,
-        price: material.price || 0,
-        isCreateMenedger: true,
-        quantity: parseFloat(quantityDifference),
-      },
-      { transaction }
-    );
-  } else {
-    existingMaterial.quantity =
-      (parseFloat(existingMaterial.quantity) || 0) +
-      parseFloat(quantityDifference);
-    await existingMaterial.save({ transaction });
-  }
-}
-
-// async function processWarehouseMaterial(
-//   material,
-//   quantityDifference,
-//   transaction
-// ) {
-//   const warehouseItem = await Warehouse.findByPk(material.warehouseId, {
-//     transaction,
-//   });
-
-//   if (!warehouseItem) {
-//     throw new Error(`Складской товар с ID ${material.warehouseId} не найден`);
-//   }
-
-//   const availableQuantity = parseFloat(warehouseItem.quantity) || 0;
-
-//   if (quantityDifference > 0) {
-//     if (availableQuantity >= quantityDifference) {
-//       warehouseItem.quantity -= quantityDifference;
-//     } else {
-//       const missingQuantity = quantityDifference - availableQuantity;
-//       warehouseItem.quantity = 0;
-
-//       await updateOrCreateMaterial(
-//         material,
-//         missingQuantity,
-//         false,
-//         transaction
-//       );
-
-//       console.log("UPDATE OR CREATE");
-//     }
-//   } else if (quantityDifference < 0) {
-//     warehouseItem.quantity += Math.abs(quantityDifference);
-//   }
-
-//   await warehouseItem.save({ transaction });
-//   await sendLowStockNotification(
-//     material.name, // Название материала
-//     quantityDifference, // Требуемое количество
-//     availableQuantity, // Доступное количество
-//     missingQuantity // Недостающее количество
-//   );
-// }
-
-async function processWarehouseMaterial(
-  material,
-  quantityDifference,
-  transaction
-) {
-  const warehouseItem = await Warehouse.findByPk(material.warehouseId, {
-    transaction,
-  });
-
-  if (!warehouseItem) {
-    throw new Error(`Складской товар с ID ${material.warehouseId} не найден`);
-  }
-
-  const availableQuantity = parseFloat(warehouseItem.quantity) || 0;
-  let missingQuantity = 0; // Объявляем переменную заранее
-
-  if (quantityDifference > 0) {
-    if (availableQuantity >= quantityDifference) {
-      // Если на складе достаточно товара
-      warehouseItem.quantity -= quantityDifference;
+      await OrderMaterials.upsert(
+        {
+          ...material,
+          quantity: parsedQuantity,
+          deficit: 0,
+          parentId,
+          warehouseId: null,
+        },
+        { transaction }
+      );
     } else {
-      // Если товара на складе недостаточно
-      missingQuantity = quantityDifference - availableQuantity;
-      warehouseItem.quantity = 0;
+      const quantityDifference = parsedQuantity - previousQuantity;
 
-      await updateOrCreateMaterial(
-        material,
-        missingQuantity,
-        false,
-        transaction
+      let deficit = 0;
+
+      if (warehouseId) {
+        const warehouseItem = await Warehouse.findByPk(warehouseId, {
+          transaction,
+        });
+
+        if (!warehouseItem) {
+          throw new Error(`Складской товар с ID ${warehouseId} не найден`);
+        }
+
+        const availableQuantity = parseFloat(warehouseItem.quantity) || 0;
+
+        if (availableQuantity < 5) {
+          await sendLowStockNotification(
+            `${warehouseItem.name}${warehouseItem.length}X${warehouseItem.width}X${warehouseItem.thickness}`,
+            availableQuantity
+          );
+        }
+
+        if (quantityDifference > 0) {
+          if (availableQuantity >= quantityDifference) {
+            warehouseItem.quantity -= quantityDifference;
+          } else {
+            deficit = quantityDifference - availableQuantity;
+            warehouseItem.quantity = 0;
+
+            await createMissingMaterial(warehouseItem, deficit, transaction);
+          }
+
+          await warehouseItem.save({ transaction });
+        } else if (quantityDifference < 0) {
+          warehouseItem.quantity += Math.abs(quantityDifference);
+          deficit = 0;
+          await warehouseItem.save({ transaction });
+        }
+      }
+
+      await OrderMaterials.upsert(
+        {
+          ...rest,
+          quantity: parsedQuantity,
+          deficit,
+          parentId,
+          warehouseId,
+        },
+        { transaction }
       );
-
-      console.log("UPDATE OR CREATE");
     }
-  } else if (quantityDifference < 0) {
-    // Если происходит возврат материалов
-    warehouseItem.quantity += Math.abs(quantityDifference);
   }
-
-  await warehouseItem.save({ transaction });
-
-  // Отправляем уведомление о нехватке, если недостающее количество больше 0
-  if (missingQuantity > 0) {
-    await sendLowStockNotification(
-      material.name, // Название материала
-      quantityDifference, // Требуемое количество
-      availableQuantity, // Доступное количество
-      missingQuantity // Недостающее количество
-    );
-  }
-}
-
-async function updateOrCreateMaterial(
-  material,
-  missingQuantity,
-  isCreateMenedger,
-  transaction
-) {
-  const materialData = material.warehouseId
-    ? await getMaterialDataFromWarehouse(material.warehouseId, transaction)
-    : {
-        id: uuidv4(),
-        name: material.name,
-        length: material.length || null,
-        width: material.width || null,
-        thickness: material.thickness || null,
-        weight: material.weight || 0,
-        price: material.price || 0,
-        priceM2: material.priceM2 || 0,
-        quantity: material.quantity || 0,
-        warehouseId: material.id,
-      };
-
-  const existingMaterial = await Materials.findOne({
-    where: { id: materialData.id },
-    transaction,
-  });
-
-  if (!existingMaterial) {
-    await Materials.create(
-      {
-        ...materialData,
-        isCreateMenedger: !!isCreateMenedger,
-        quantity: parseFloat(missingQuantity),
-      },
-      { transaction }
-    );
-  } else {
-    console.log(
-      `[Обновление] Обновляем материал ${materialData.name}: добавляем ${missingQuantity}`
-    );
-    existingMaterial.quantity =
-      (parseFloat(existingMaterial.quantity) || 0) +
-      parseFloat(missingQuantity);
-
-    await existingMaterial.save({ transaction });
-  }
-}
-
-async function getMaterialDataFromWarehouse(warehouseId, transaction) {
-  const warehouseItem = await Warehouse.findByPk(warehouseId, { transaction });
-
-  if (!warehouseItem) {
-    throw new Error(
-      `Складской товар с ID ${warehouseId} не найден для добавления в Materials`
-    );
-  }
-
-  return {
-    id: uuidv4(),
-    name: warehouseItem.name,
-    length: warehouseItem.length || null,
-    width: warehouseItem.width || null,
-    thickness: warehouseItem.thickness || null,
-    weight: warehouseItem.weight || 0,
-    price: warehouseItem.price || 0,
-    priceM2: warehouseItem.priceM2 || 0,
-    warehouseId: warehouseItem.id,
-  };
 }
 
 async function handleOrderServices(orderServices, parentId, transaction) {
@@ -433,6 +310,78 @@ async function handleOrderWorks(orderWorks, parentId, transaction) {
   if (orderWorks && orderWorks.length > 0) {
     for (const work of orderWorks) {
       await OrderWorks.create({ ...work, parentId }, { transaction });
+    }
+  }
+}
+async function sendOrderUpdateMessage(message, type) {
+  const targetChatIds = type === "status" ? statusChatIds : orderChatIds;
+
+  for (const chatId of targetChatIds) {
+    console.log("targetChatIds", targetChatIds);
+    console.log("type", type);
+    try {
+      if (type === "status") {
+        await botStatus.sendMessage(chatId, message, { parse_mode: "HTML" });
+      } else {
+        await botOrders.sendMessage(chatId, message, { parse_mode: "HTML" });
+      }
+    } catch (error) {
+      console.error(`Ошибка отправки сообщения в чат ${chatId}:`, error);
+    }
+  }
+}
+async function returnMaterialsToWarehouse(orderMaterials, transaction) {
+  for (const material of orderMaterials) {
+    if (material.isCreatedMenedger) {
+      continue;
+    }
+
+    const warehouseItem = await Warehouse.findByPk(material.warehouseId, {
+      transaction,
+    });
+
+    if (warehouseItem) {
+      const returnableQuantity =
+        parseFloat(material.quantity) - parseFloat(material.deficit || 0);
+
+      warehouseItem.quantity += returnableQuantity;
+      await warehouseItem.save({ transaction });
+    } else {
+      console.warn(
+        `Складской товар с ID ${material.warehouseId} не найден для материала ${material.name}`
+      );
+    }
+  }
+}
+async function updateMaterialsDeficit(orderMaterials, transaction) {
+  for (const material of orderMaterials) {
+    if (material.isCreatedMenedger) {
+      continue;
+    }
+    if (material.deficit && material.deficit > 0) {
+      const existingMaterial = await Materials.findByPk(material.warehouseId, {
+        transaction,
+      });
+
+      if (existingMaterial) {
+        existingMaterial.quantity -= material.deficit; // Уменьшаем количество
+        if (existingMaterial.quantity < 0) existingMaterial.quantity = 0; // Не допускаем отрицательных значений
+
+        await existingMaterial.save({ transaction });
+
+        if (existingMaterial.quantity === 0) {
+          await Materials.destroy({
+            where: {
+              id: material.warehouseId,
+            },
+            transaction,
+          });
+        }
+      } else {
+        console.warn(
+          `Материал с ID ${material.warehouseId} не найден в таблице Materials`
+        );
+      }
     }
   }
 }
@@ -477,6 +426,12 @@ router.get("/", async (req, res) => {
         {
           model: models.OrderDeads,
         },
+        {
+          model: models.OrderStatuses,
+        },
+        {
+          model: models.OrderPhotoLinks,
+        },
       ],
     });
 
@@ -489,7 +444,6 @@ router.get("/", async (req, res) => {
     res.status(500).json({ message: "Ошибка при обновлении данных" });
   }
 });
-
 router.get("/:id", async (req, res) => {
   const { id: orderId } = req.params;
 
@@ -509,6 +463,12 @@ router.get("/:id", async (req, res) => {
         {
           model: models.OrderDeads,
         },
+        {
+          model: models.OrderStatuses,
+        },
+        {
+          model: models.OrderPhotoLinks,
+        },
       ],
     });
 
@@ -527,20 +487,44 @@ router.get("/:id", async (req, res) => {
     res.status(500).json({ message: "Ошибка при получении данных заказа" });
   }
 });
-
-router.post("/create", async (req, res) => {
-  const { orderData, orderDeads, orderMaterials, orderWorks, orderServices } =
-    req.body;
+router.post("/create", upload.array("photos"), async (req, res) => {
+  const {
+    orderData,
+    orderDeads,
+    orderMaterials,
+    orderWorks,
+    orderServices,
+    rowsPhotos,
+  } = req.body;
 
   const transaction = await Orders.sequelize.transaction();
 
   try {
     const order = await Orders.create(orderData, { transaction });
 
+    await OrderStatuses.create(
+      {
+        parentId: order.id,
+        new: true,
+      },
+      { transaction }
+    );
+
     await handleOrderDeads(orderDeads, order.id, transaction);
     await handleOrderMaterials(orderMaterials, order.id, transaction, false);
     await handleOrderWorks(orderWorks, order.id, transaction);
     await handleOrderServices(orderServices, order.id, transaction);
+
+    if (
+      rowsPhotos &&
+      (rowsPhotos.carvings?.length > 0 || rowsPhotos.artistic?.length > 0)
+    ) {
+      await handleOrderPhotos(
+        [...(rowsPhotos.carvings || []), ...(rowsPhotos.artistic || [])],
+        order.id,
+        transaction
+      );
+    }
 
     const message = `
     📦 <b>Добавлен новый заказ</b>\n
@@ -566,14 +550,77 @@ router.post("/create", async (req, res) => {
   } catch (error) {
     await transaction.rollback();
     console.error("Помилка при створенні замовлення:", error);
+
+    if (rowsPhotos) {
+      const allPhotos = [
+        ...(rowsPhotos.carvings || []),
+        ...(rowsPhotos.artistic || []),
+      ];
+
+      await Promise.all(
+        allPhotos.map(async (photo) => {
+          await deleteFileFromS3(photo.key);
+        })
+      );
+    }
+
     res.status(500).json({ message: "Помилка при створенні замовлення" });
   }
 });
+// router.put("/update/:id", upload.array("photos"), async (req, res) => {
+//   const { id } = req.params;
+//   const { orderData, orderDeads, orderMaterials, orderWorks, orderServices } =
+//     req.body;
 
-router.put("/update/:id", async (req, res) => {
+//   const transaction = await Orders.sequelize.transaction();
+
+//   try {
+//     const order = await Orders.findByPk(id);
+//     if (!order) {
+//       return res.status(404).json({ message: "Замовлення не знайдено" });
+//     }
+
+//     await order.update(orderData, { transaction });
+//     await deleteRelatedData(id, transaction);
+//     await handleOrderDeads(orderDeads, id, transaction);
+//     await handleOrderMaterials(orderMaterials, id, transaction, true);
+//     await handleOrderWorks(orderWorks, id, transaction);
+//     await handleOrderServices(orderServices, id, transaction);
+
+//     if (
+//       rowsPhotos &&
+//       (rowsPhotos.carvings?.length > 0 || rowsPhotos.artistic?.length > 0)
+//     ) {
+//       await handleOrderPhotos(
+//         [...(rowsPhotos.carvings || []), ...(rowsPhotos.artistic || [])],
+//         order.id,
+//         transaction
+//       );
+//     }
+
+//     await transaction.commit();
+
+//     res.status(200).json({
+//       message: "Замовлення успішно оновлено",
+//       order,
+//     });
+//   } catch (error) {
+//     await transaction.rollback();
+//     console.error("Помилка при оновленні замовлення:", error);
+//     res.status(500).json({ message: "Помилка при оновленні замовлення" });
+//   }
+// });
+
+router.put("/update/:id", upload.array("photos"), async (req, res) => {
   const { id } = req.params;
-  const { orderData, orderDeads, orderMaterials, orderWorks, orderServices } =
-    req.body;
+  const {
+    orderData,
+    orderDeads,
+    orderMaterials,
+    orderWorks,
+    orderServices,
+    rowsPhotos = {},
+  } = req.body;
 
   const transaction = await Orders.sequelize.transaction();
 
@@ -590,6 +637,48 @@ router.put("/update/:id", async (req, res) => {
     await handleOrderWorks(orderWorks, id, transaction);
     await handleOrderServices(orderServices, id, transaction);
 
+    const oldPhotos = await OrderPhotoLinks.findAll({
+      where: { parentId: id },
+      transaction,
+    });
+
+    const newPhotoKeys = new Set(
+      [...(rowsPhotos.carvings || []), ...(rowsPhotos.artistic || [])]
+        .map((photo) => photo.fileKey || photo.key)
+        .filter(Boolean)
+    );
+
+    const photosToDelete = oldPhotos.filter(
+      (photo) => photo.fileKey && !newPhotoKeys.has(photo.fileKey)
+    );
+
+    await Promise.all(
+      photosToDelete.map(async (photo) => {
+        if (photo.fileKey) {
+          await deleteFileFromS3(photo.fileKey);
+        }
+      })
+    );
+
+    await OrderPhotoLinks.destroy({
+      where: {
+        parentId: id,
+        fileKey: photosToDelete.map((photo) => photo.fileKey),
+      },
+      transaction,
+    });
+
+    if (
+      Array.isArray(rowsPhotos.carvings) ||
+      Array.isArray(rowsPhotos.artistic)
+    ) {
+      await handleOrderPhotos(
+        [...(rowsPhotos.carvings || []), ...(rowsPhotos.artistic || [])],
+        id,
+        transaction
+      );
+    }
+
     await transaction.commit();
 
     res.status(200).json({
@@ -598,7 +687,7 @@ router.put("/update/:id", async (req, res) => {
     });
   } catch (error) {
     await transaction.rollback();
-    console.error("Помилка при оновленні замовлення:", error);
+    console.error("❌ Помилка при оновленні замовлення:", error);
     res.status(500).json({ message: "Помилка при оновленні замовлення" });
   }
 });
@@ -615,17 +704,38 @@ router.put("/change-status-order", async (req, res) => {
   const transaction = await Orders.sequelize.transaction();
 
   try {
-    await Orders.update(
-      { status: newStatus },
-      { where: { id: orderId }, transaction }
-    );
+    const orderStatus = await OrderStatuses.findOne({
+      where: { parentId: orderId },
+      transaction,
+    });
 
+    if (!orderStatus) {
+      throw new Error("Статуси для замовлення не знайдені");
+    }
+
+    if (
+      !Object.prototype.hasOwnProperty.call(orderStatus.dataValues, newStatus)
+    ) {
+      throw new Error("Новий статус є недійсним");
+    }
+
+    // Установить новый статус в true
+    const updatedStatuses = { [newStatus]: true };
+
+    // Обновить только переданный статус, остальные оставить без изменений
+    await OrderStatuses.update(updatedStatuses, {
+      where: { parentId: orderId },
+      transaction,
+    });
+
+    // Найти заказ для уведомления
     const order = await Orders.findByPk(orderId);
 
     if (!order) {
       throw new Error("Замовлення не знайдено");
     }
 
+    // Создать сообщение
     const message = `
 📦 <b>Статус замовлення змінено</b>\n
 📝 <b>Назва замовлення:</b> ${order.name}\n
@@ -635,6 +745,7 @@ router.put("/change-status-order", async (req, res) => {
 🔄 <b>Новий статус:</b> ${selectStatus(newStatus)}
     `;
 
+    // Отправить уведомление
     await sendOrderUpdateMessage(message, "status");
 
     await transaction.commit();
@@ -647,113 +758,126 @@ router.put("/change-status-order", async (req, res) => {
   }
 });
 
-// router.delete("/remove-order/:orderId", async (req, res) => {
-//   const { orderId } = req.params;
+router.delete("/remove-order/:orderId", async (req, res) => {
+  const { orderId } = req.params;
 
-//   const transaction = await Orders.sequelize.transaction();
+  const transaction = await Orders.sequelize.transaction();
 
-//   try {
-//     const orderMaterials = await OrderMaterials.findAll({
-//       where: { parentId: orderId },
-//       transaction,
-//     });
+  try {
+    const order = await Orders.findByPk(orderId, { transaction });
 
-//     console.log("Матеріали замовлення:", orderMaterials);
+    const isCompleted = order.status === "completed";
 
-//     for (const material of orderMaterials) {
-//       console.log("Обробка матеріалу:", material);
+    const orderMaterials = await OrderMaterials.findAll({
+      where: { parentId: orderId },
+      transaction,
+    });
 
-//       if (material.warehouseId) {
-//         const warehouseItem = await Warehouse.findByPk(material.warehouseId, {
-//           transaction,
-//         });
+    if (orderMaterials.length === 0) {
+      console.log("Материалы для заказа не найдены.");
+      return res
+        .status(404)
+        .json({ message: "Материалы для заказа не найдены" });
+    }
 
-//         if (warehouseItem) {
-//           console.log("Поточна кількість на складі:", warehouseItem.quantity);
+    if (!isCompleted) {
+      await returnMaterialsToWarehouse(orderMaterials, transaction);
+      await updateMaterialsDeficit(orderMaterials, transaction);
+    }
 
-//           const restoredQuantity = parseFloat(material.quantity) || 1;
-//           warehouseItem.quantity =
-//             (parseFloat(warehouseItem.quantity) || 0) + restoredQuantity;
+    await deleteCustomMaterials(orderMaterials, transaction);
 
-//           console.log(
-//             `Відновлено кількість: +${restoredQuantity}, Нова кількість: ${warehouseItem.quantity}`
-//           );
+    const orderPhotos = await OrderPhotoLinks.findAll({
+      where: { parentId: orderId },
+      transaction,
+    });
 
-//           await warehouseItem.save({ transaction });
-//         } else {
-//           console.warn(
-//             `Складський ресурс із ID ${material.warehouseId} не знайдено`
-//           );
-//         }
-//       }
-//     }
+    await Promise.all(
+      orderPhotos.map(async (photo) => {
+        await deleteFileFromS3(photo.fileKey);
+      })
+    );
 
-//     await OrderMaterials.destroy({
-//       where: { parentId: orderId },
-//       transaction,
-//     });
+    await OrderPhotoLinks.destroy({
+      where: { parentId: orderId },
+      transaction,
+    });
 
-//     await Orders.destroy({ where: { id: orderId }, transaction });
+    await Orders.destroy({
+      where: { id: orderId },
+      transaction,
+    });
 
-//     await transaction.commit();
+    await transaction.commit();
 
-//     res.status(200).json({
-//       message: "Замовлення успішно видалено, ресурси повернено на склад",
-//     });
-//   } catch (error) {
-//     await transaction.rollback();
-//     console.error("Помилка при видаленні замовлення:", error);
-//     res.status(500).json({ message: "Помилка при видаленні замовлення" });
-//   }
-// });
+    res.status(200).json({
+      message: "Заказ успешно удален, ресурсы возвращены на склад",
+    });
+  } catch (error) {
+    await transaction.rollback();
+    console.error(
+      `Ошибка при удалении заказа с ID: ${orderId}. Откат транзакции.`
+    );
+    console.error("Детали ошибки:", error);
 
-//testing start
+    res.status(500).json({ message: "Ошибка при удалении заказа" });
+  }
+});
 
-//testing end
+router.delete("/delete-from-s3", async (req, res) => {
+  const { fileKey } = req.query;
+  console.log("🗑️ Запрос на удаление:", fileKey);
 
-// router.delete("/remove-order/:orderId", async (req, res) => {
-//   const { orderId } = req.params;
+  await deleteFileFromS3(fileKey);
 
-//   const transaction = await Orders.sequelize.transaction();
+  try {
+    res.status(200).json({
+      message: "Фото с s3 успешно удалено",
+    });
+  } catch (error) {
+    console.error(`Ошибка при удалении фото с key: ${fileKey}.`);
+    console.error("Детали ошибки:", error);
 
-//   try {
-//     let totalCount = 0;
-//     let returnedWarehouse = 0;
-//     let materialQuantity = 0;
+    res.status(500).json({ message: "Ошибка при удалении заказа" });
+  }
+});
 
-//     const newOrders = await Orders.findAll({
-//       where: { status: "new" },
-//       include: [{ model: OrderMaterials }],
-//       transaction,
-//     });
+const handleOrderPhotos = async (allPhotos, parentId, transaction) => {
+  console.log("parentId", parentId);
+  if (!parentId) {
+    throw new Error("parentId обязателен!");
+  }
 
-//     for (const order of newOrders) {
-//       for (const material of order.OrderMaterials) {
-//         totalCount += parseFloat(material.quantity) || 0;
+  if (!Array.isArray(allPhotos) || allPhotos.length === 0) {
+    console.log("⚠️ Нет данных для сохранения.");
+    return;
+  }
 
-//         const materialEntry = await Materials.findOne({
-//           where: { warehouseId: material.warehouseId },
-//           transaction,
-//         });
+  const photoRecords = allPhotos.map((photo) => ({
+    parentId,
+    url: photo.url,
+    fileKey: photo.key,
+    description: photo.description || null,
+    type: photo.type || null,
+  }));
 
-//         if (materialEntry) {
-//           materialQuantity = parseFloat(materialEntry.quantity) || 0;
-//         }
-//       }
+  try {
+    await OrderPhotoLinks.bulkCreate(photoRecords, { transaction });
+  } catch (error) {
+    throw error;
+  }
+};
 
-//       returnedWarehouse = totalCount - materialQuantity;
-//     }
+const deleteFileFromS3 = async (fileKey) => {
+  try {
+    const params = {
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: fileKey,
+    };
 
-//     console.log("KKKDKD", returnedWarehouse);
-
-//     res.status(200).json({
-//       message: "Замовлення успішно видалено, ресурси повернено на склад",
-//     });
-//   } catch (error) {
-//     await transaction.rollback();
-//     console.error("Ошибка при удалении заказа:", error);
-//     res.status(500).json({ message: "Ошибка при удалении заказа" });
-//   }
-// });
-
+    await s3.deleteObject(params).promise();
+  } catch (error) {
+    console.error(`❌ Ошибка при удалении файла ${fileKey}:`, error.message);
+  }
+};
 module.exports = router;

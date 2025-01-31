@@ -11,6 +11,7 @@ module.exports = (sequelize) => {
       type: Sequelize.CHAR(36),
       allowNull: false,
     },
+    warehouseId: { type: Sequelize.CHAR(36), allowNull: true },
     name: Sequelize.STRING,
     price: Sequelize.STRING,
     quantity: Sequelize.FLOAT,
