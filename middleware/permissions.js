@@ -9,7 +9,7 @@ function isOwner(req, res, next) {
     const decoded = jwt.verify(token, process.env.SECRET_KEY);
 
     if (decoded.roles.includes("Owner")) {
-      req.user = decoded; // Сохраняем пользователя в запросе
+      req.user = decoded;
       return next();
     }
 
