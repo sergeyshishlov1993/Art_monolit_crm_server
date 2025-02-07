@@ -4,6 +4,7 @@ const router = Router();
 const { models } = require("../models/index");
 const multer = require("multer");
 const s3 = require("../s3Config");
+const { v4: uuidv4 } = require("uuid");
 
 const {
   Orders,
@@ -20,18 +21,14 @@ const {
 const { Op } = require("sequelize");
 const upload = multer({ storage: multer.memoryStorage() });
 
-//TELEGRAM BOTS
-const botStatusToken = "8162606893:AAEBI9zyxJ65SDAJAcYzPRDyXXbyuaWYkac";
-const botStatus = new TelegramBot(botStatusToken, { polling: true });
-const statusChatIds = new Set();
-
-const botOrdersTokken = "7983082460:AAGjnK4UrVeN8eNDKm0bQoFu0itVRxQ1-sE";
-const botOrders = new TelegramBot(botOrdersTokken, { polling: true });
-const orderChatIds = new Set();
-
-const botWarehouseToken = "7819287579:AAFX0VMVwXNI-nequ_R69KGGIUofv6j-Dro";
-const botWarehouse = new TelegramBot(botWarehouseToken, { polling: true });
-const warehouseChatIds = new Set();
+const {
+  botStatus,
+  botOrders,
+  botWarehouse,
+  statusChatIds,
+  orderChatIds,
+  warehouseChatIds,
+} = require("../middleware/bots");
 
 botStatus.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
@@ -79,20 +76,18 @@ botWarehouse.onText(/\/start/, (msg) => {
   }
 });
 
-//
-
 function selectStatus(key) {
   const statusOptions = {
     new: "Новый",
     layout: "Макет",
-    "layout-accepted": "Принят Макет",
-    "engraving(front)": "Гравировка(Фронт)",
-    "engraving(reverse)": "Гравировка(Реверс)",
-    "engraving(plate)": "Гравировка(Плита)",
-    "engraving(stand)": "Гравировка(Тумба)",
+    layout_accepted: "Принят Макет",
+    engraving_front: "Гравировка(Фронт)",
+    engraving_reverse: "Гравировка(Реверс)",
+    engraving_plate: "Гравировка(Плита)",
+    engraving_stand: "Гравировка(Тумба)",
     milling: "Фрезеровка",
     concreting: "Бетонирование",
-    "laying-tiles": "Укладка плитки",
+    laying_tiles: "Укладка плитки",
     installation: "Установка",
     completed: "Завершен",
   };
@@ -139,7 +134,7 @@ async function createCustomMaterials(material, transaction) {
       priceM2: material.priceM2,
       weight: material.weight,
       quantity: material.quantity,
-      isCreateMenedger: false,
+      isCreateMenedger: true,
     },
     { transaction }
   );
@@ -216,18 +211,10 @@ async function handleOrderMaterials(
       if (oldOrderMaterials.length > 0) {
         await returnMaterialsToWarehouse(oldOrderMaterials);
         await updateMaterialsDeficit(orderMaterials);
-      } else {
-        console.log(
-          "NO OLD MATERIALS FOUND. SKIPPING RETURN AND DEFICIT UPDATE"
-        );
       }
     }
 
-    // Перевірка значення material перед виконанням операцій
     if (!material.name || parsedQuantity <= 0) {
-      console.log(
-        `SKIPPING: Invalid material data - ${JSON.stringify(material)}`
-      );
       continue;
     }
 
@@ -317,8 +304,6 @@ async function sendOrderUpdateMessage(message, type) {
   const targetChatIds = type === "status" ? statusChatIds : orderChatIds;
 
   for (const chatId of targetChatIds) {
-    console.log("targetChatIds", targetChatIds);
-    console.log("type", type);
     try {
       if (type === "status") {
         await botStatus.sendMessage(chatId, message, { parse_mode: "HTML" });
@@ -387,63 +372,96 @@ async function updateMaterialsDeficit(orderMaterials, transaction) {
 }
 
 router.get("/", async (req, res) => {
-  const { status, startDate, endDate, search } = req.query;
+  const {
+    status,
+    startDate,
+    endDate,
+    search,
+    storeAddress,
+    page = 1,
+    per_page = 10,
+  } = req.query;
 
   try {
     const where = {};
+    const limit = parseInt(per_page) || 10;
+    const currentPage = Math.max(1, parseInt(page) || 1);
+    let offset = (currentPage - 1) * limit;
 
-    if (status) {
+    if (startDate && endDate) {
+      const start = new Date(`${startDate}T00:00:00.000Z`);
+      const end = new Date(`${endDate}T23:59:59.999Z`);
+
+      if (!isNaN(start) && !isNaN(end)) {
+        where.createdAt = { [Op.between]: [start, end] };
+      }
+    } else if (startDate || endDate) {
+      console.warn("⚠️ Указана только одна дата! Пропускаем фильтр.");
+      return res.status(400).json({ message: "Необходимо указать обе даты" });
+    }
+
+    if (status && status !== "all") {
       where.status = status;
     }
 
-    if (startDate || endDate) {
-      where.createdAt = {};
-      if (startDate) {
-        where.createdAt[Op.gte] = new Date(startDate);
-      }
-      if (endDate) {
-        where.createdAt[Op.lte] = new Date(endDate);
-      }
+    if (search) {
+      where[Op.or] = [
+        { phone: { [Op.like]: `%${search}%` } },
+        { first_name: { [Op.like]: `%${search}%` } },
+        { second_name: { [Op.like]: `%${search}%` } },
+      ];
     }
 
-    // Пошук
-    if (search) {
-      where[Op.or] = [{ phone: { [Op.like]: `%${search}%` } }];
+    if (storeAddress) {
+      where.storeAddress = { [Op.like]: `%${storeAddress}%` };
     }
+
+    const totalOrders = await Orders.count({ where });
+
+    if (totalOrders === 0) {
+      return res.status(200).json({
+        message: "Успешно (Заказы)",
+        orders: [],
+        totalOrders: 0,
+        currentPage,
+        perPage: limit,
+        totalPages: 1,
+      });
+    }
+
+    const totalPages = Math.ceil(totalOrders / limit);
+
+    offset = Math.min(offset, Math.max(0, totalOrders - limit));
 
     const orders = await Orders.findAll({
       where,
       include: [
-        {
-          model: models.OrderMaterials,
-        },
-        {
-          model: models.OrderWorks,
-        },
-        {
-          model: models.OrderServices,
-        },
-        {
-          model: models.OrderDeads,
-        },
-        {
-          model: models.OrderStatuses,
-        },
-        {
-          model: models.OrderPhotoLinks,
-        },
+        { model: models.OrderMaterials },
+        { model: models.OrderWorks },
+        { model: models.OrderServices },
+        { model: models.OrderStatuses },
+        { model: models.OrderDeads },
+        { model: models.OrderPhotoLinks },
       ],
+      order: [["createdAt", "DESC"]],
+      limit,
+      offset,
     });
 
     res.status(200).json({
       message: "Успешно (Заказы)",
       orders,
+      totalOrders,
+      currentPage,
+      perPage: limit,
+      totalPages,
     });
   } catch (error) {
-    console.error("Ошибка при обновлении данных:", error);
-    res.status(500).json({ message: "Ошибка при обновлении данных" });
+    console.error("❌ Ошибка при получении заказов:", error);
+    res.status(500).json({ message: "Ошибка при получении заказов" });
   }
 });
+
 router.get("/:id", async (req, res) => {
   const { id: orderId } = req.params;
 
@@ -567,49 +585,6 @@ router.post("/create", upload.array("photos"), async (req, res) => {
     res.status(500).json({ message: "Помилка при створенні замовлення" });
   }
 });
-// router.put("/update/:id", upload.array("photos"), async (req, res) => {
-//   const { id } = req.params;
-//   const { orderData, orderDeads, orderMaterials, orderWorks, orderServices } =
-//     req.body;
-
-//   const transaction = await Orders.sequelize.transaction();
-
-//   try {
-//     const order = await Orders.findByPk(id);
-//     if (!order) {
-//       return res.status(404).json({ message: "Замовлення не знайдено" });
-//     }
-
-//     await order.update(orderData, { transaction });
-//     await deleteRelatedData(id, transaction);
-//     await handleOrderDeads(orderDeads, id, transaction);
-//     await handleOrderMaterials(orderMaterials, id, transaction, true);
-//     await handleOrderWorks(orderWorks, id, transaction);
-//     await handleOrderServices(orderServices, id, transaction);
-
-//     if (
-//       rowsPhotos &&
-//       (rowsPhotos.carvings?.length > 0 || rowsPhotos.artistic?.length > 0)
-//     ) {
-//       await handleOrderPhotos(
-//         [...(rowsPhotos.carvings || []), ...(rowsPhotos.artistic || [])],
-//         order.id,
-//         transaction
-//       );
-//     }
-
-//     await transaction.commit();
-
-//     res.status(200).json({
-//       message: "Замовлення успішно оновлено",
-//       order,
-//     });
-//   } catch (error) {
-//     await transaction.rollback();
-//     console.error("Помилка при оновленні замовлення:", error);
-//     res.status(500).json({ message: "Помилка при оновленні замовлення" });
-//   }
-// });
 
 router.put("/update/:id", upload.array("photos"), async (req, res) => {
   const { id } = req.params;
@@ -627,10 +602,11 @@ router.put("/update/:id", upload.array("photos"), async (req, res) => {
   try {
     const order = await Orders.findByPk(id);
     if (!order) {
-      return res.status(404).json({ message: "Замовлення не знайдено" });
+      return res.status(404).json({ message: "Заказ не найден" });
     }
 
     await order.update(orderData, { transaction });
+
     await deleteRelatedData(id, transaction);
     await handleOrderDeads(orderDeads, id, transaction);
     await handleOrderMaterials(orderMaterials, id, transaction, true);
@@ -642,119 +618,141 @@ router.put("/update/:id", upload.array("photos"), async (req, res) => {
       transaction,
     });
 
-    const newPhotoKeys = new Set(
-      [...(rowsPhotos.carvings || []), ...(rowsPhotos.artistic || [])]
-        .map((photo) => photo.fileKey || photo.key)
-        .filter(Boolean)
+    const newPhotos = [
+      ...(rowsPhotos.carvings || []),
+      ...(rowsPhotos.artistic || []),
+    ];
+
+    const newPhotoIds = new Set(
+      newPhotos.map((photo) => photo.id).filter(Boolean)
     );
 
     const photosToDelete = oldPhotos.filter(
-      (photo) => photo.fileKey && !newPhotoKeys.has(photo.fileKey)
+      (photo) => !newPhotoIds.has(photo.id)
     );
 
-    await Promise.all(
-      photosToDelete.map(async (photo) => {
-        if (photo.fileKey) {
-          await deleteFileFromS3(photo.fileKey);
-        }
-      })
-    );
+    for (const photo of photosToDelete) {
+      if (photo.fileKey) {
+        await deleteFileFromS3(photo.fileKey);
+      }
+    }
 
     await OrderPhotoLinks.destroy({
       where: {
         parentId: id,
-        fileKey: photosToDelete.map((photo) => photo.fileKey),
+        id: photosToDelete.map((photo) => photo.id),
       },
       transaction,
     });
 
-    if (
-      Array.isArray(rowsPhotos.carvings) ||
-      Array.isArray(rowsPhotos.artistic)
-    ) {
-      await handleOrderPhotos(
-        [...(rowsPhotos.carvings || []), ...(rowsPhotos.artistic || [])],
-        id,
-        transaction
+    for (const photo of newPhotos) {
+      if (!photo.key) {
+        console.warn("⚠️ Пропущено фото без key:", photo);
+        continue;
+      }
+
+      await OrderPhotoLinks.upsert(
+        {
+          id: photo.id || uuidv4(),
+          parentId: id,
+          url: photo.url,
+          fileKey: photo.key,
+          description: photo.description || null,
+          type: photo.type,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        { transaction }
       );
     }
 
     await transaction.commit();
 
     res.status(200).json({
-      message: "Замовлення успішно оновлено",
+      message: "Заказ успешно обновлен",
       order,
     });
   } catch (error) {
     await transaction.rollback();
-    console.error("❌ Помилка при оновленні замовлення:", error);
-    res.status(500).json({ message: "Помилка при оновленні замовлення" });
+    console.error("❌ Ошибка при обновлении заказа:", error);
+    res.status(500).json({ message: "Ошибка при обновлении заказа" });
   }
 });
 
 router.put("/change-status-order", async (req, res) => {
-  const { orderId, newStatus } = req.body;
+  const { orderId, statuses } = req.body;
 
-  if (!orderId || !newStatus) {
+  if (!orderId || !Array.isArray(statuses)) {
     return res
       .status(400)
-      .json({ message: "orderId та newStatus є обов'язковими" });
+      .json({ message: "orderId и statuses (массив) обязательны" });
   }
 
   const transaction = await Orders.sequelize.transaction();
 
   try {
-    const orderStatus = await OrderStatuses.findOne({
-      where: { parentId: orderId },
-      transaction,
-    });
-
-    if (!orderStatus) {
-      throw new Error("Статуси для замовлення не знайдені");
-    }
-
-    if (
-      !Object.prototype.hasOwnProperty.call(orderStatus.dataValues, newStatus)
-    ) {
-      throw new Error("Новий статус є недійсним");
-    }
-
-    // Установить новый статус в true
-    const updatedStatuses = { [newStatus]: true };
-
-    // Обновить только переданный статус, остальные оставить без изменений
-    await OrderStatuses.update(updatedStatuses, {
-      where: { parentId: orderId },
-      transaction,
-    });
-
-    // Найти заказ для уведомления
-    const order = await Orders.findByPk(orderId);
+    const order = await Orders.findByPk(orderId, { transaction });
 
     if (!order) {
-      throw new Error("Замовлення не знайдено");
+      throw new Error("Заказ не найден");
     }
 
-    // Создать сообщение
+    const allStatuses = [
+      "new",
+      "layout",
+      "layout_accepted",
+      "engraving_front",
+      "engraving_reverse",
+      "engraving_plate",
+      "engraving_stand",
+      "milling",
+      "concreting",
+      "laying_tiles",
+      "installation",
+      "completed",
+    ];
+
+    const updateData = {};
+    allStatuses.forEach((status) => {
+      updateData[status] = false;
+    });
+
+    statuses.forEach((status) => {
+      if (allStatuses.includes(status)) {
+        updateData[status] = true;
+      }
+    });
+
+    await OrderStatuses.update(updateData, {
+      where: { parentId: orderId },
+      transaction,
+    });
+
+    const mainStatus = statuses.length ? statuses[statuses.length - 1] : null;
+
+    await Orders.update(
+      { status: mainStatus },
+      { where: { id: orderId }, transaction }
+    );
+
     const message = `
 📦 <b>Статус замовлення змінено</b>\n
 📝 <b>Назва замовлення:</b> ${order.name}\n
 👤 <b>Замовник:</b> ${order.first_name} ${order.second_name}\n
 📞 <b>Телефон:</b> ${order.phone}\n
 🕒 <b>Дата зміни:</b> ${new Date().toLocaleString()}\n
-🔄 <b>Новий статус:</b> ${selectStatus(newStatus)}
+🔄 <b>Новий статус:</b> ${selectStatus(mainStatus)}
     `;
 
-    // Отправить уведомление
     await sendOrderUpdateMessage(message, "status");
 
     await transaction.commit();
 
-    res.status(200).json({ message: "Успішно статус змінено" });
+    res.status(200).json({ message: "Успішно статуси оновлено" });
   } catch (error) {
     await transaction.rollback();
-    console.error("Помилка при зміні статусу замовлення:", error);
-    res.status(500).json({ message: "Помилка при зміні статусу замовлення" });
+    console.error("Помилка при зміні статусів замовлення:", error);
+    res.status(500).json({ message: "Помилка при зміні статусів замовлення" });
   }
 });
 
@@ -774,7 +772,6 @@ router.delete("/remove-order/:orderId", async (req, res) => {
     });
 
     if (orderMaterials.length === 0) {
-      console.log("Материалы для заказа не найдены.");
       return res
         .status(404)
         .json({ message: "Материалы для заказа не найдены" });
@@ -826,7 +823,6 @@ router.delete("/remove-order/:orderId", async (req, res) => {
 
 router.delete("/delete-from-s3", async (req, res) => {
   const { fileKey } = req.query;
-  console.log("🗑️ Запрос на удаление:", fileKey);
 
   await deleteFileFromS3(fileKey);
 
@@ -843,13 +839,11 @@ router.delete("/delete-from-s3", async (req, res) => {
 });
 
 const handleOrderPhotos = async (allPhotos, parentId, transaction) => {
-  console.log("parentId", parentId);
   if (!parentId) {
     throw new Error("parentId обязателен!");
   }
 
   if (!Array.isArray(allPhotos) || allPhotos.length === 0) {
-    console.log("⚠️ Нет данных для сохранения.");
     return;
   }
 

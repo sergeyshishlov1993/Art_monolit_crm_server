@@ -13,6 +13,7 @@ module.exports = (sequelize) => {
     comment: Sequelize.TEXT,
     name: Sequelize.STRING,
     address: Sequelize.STRING,
+    storeAddress: Sequelize.STRING,
     totalPrice: Sequelize.STRING,
     source: Sequelize.STRING,
     isDraft: Sequelize.BOOLEAN,

@@ -23,54 +23,141 @@ async function handlePreOrderItems(items, parentId, transaction, Model) {
 }
 
 router.get("/", async (req, res) => {
-  const { status, startDate, endDate, search } = req.query;
+  const {
+    status,
+    startDate,
+    endDate,
+    search,
+    storeAddress,
+    page = 1,
+    per_page = 10,
+  } = req.query;
 
   try {
     const where = {};
+    const limit = parseInt(per_page) || 10;
+    const currentPage = Math.max(1, parseInt(page) || 1);
+    let offset = (currentPage - 1) * limit;
+
+    if (startDate && endDate) {
+      const start = new Date(`${startDate}T00:00:00.000Z`);
+      const end = new Date(`${endDate}T23:59:59.999Z`);
+
+      if (!isNaN(start) && !isNaN(end)) {
+        where.createdAt = { [Op.between]: [start, end] };
+      }
+    } else if (startDate || endDate) {
+      console.warn("⚠️ Указана только одна дата! Пропускаем фильтр.");
+      return res.status(400).json({ message: "Необходимо указать обе даты" });
+    }
 
     if (status) {
       where[status] = true;
     }
 
-    if (startDate || endDate) {
-      where.createdAt = {};
-      if (startDate) {
-        where.createdAt[Op.gte] = new Date(startDate);
-      }
-      if (endDate) {
-        where.createdAt[Op.lte] = new Date(endDate);
-      }
+    if (search) {
+      where[Op.or] = [
+        { phone: { [Op.like]: `%${search}%` } },
+        { first_name: { [Op.like]: `%${search}%` } },
+        { second_name: { [Op.like]: `%${search}%` } },
+      ];
     }
 
-    // Пошук
-    if (search) {
-      where[Op.or] = [{ phone: { [Op.like]: `%${search}%` } }];
+    if (storeAddress) {
+      where.storeAddress = { [Op.like]: `%${storeAddress}%` };
     }
+
+    const totalOrders = await PreOrders.count({ where });
+
+    if (totalOrders === 0) {
+      return res.status(200).json({
+        message: "Успешно (Заказы)",
+        orders: [],
+        totalOrders: 0,
+        currentPage,
+        perPage: limit,
+        totalPages: 1,
+      });
+    }
+
+    const totalPages = Math.ceil(totalOrders / limit);
+    offset = Math.min(offset, Math.max(0, totalOrders - limit));
 
     const orders = await PreOrders.findAll({
       where,
       include: [
-        {
-          model: models.PreOrderMaterials,
-        },
-        {
-          model: models.PreOrderWorks,
-        },
-        {
-          model: models.PreOrderServices,
-        },
+        { model: models.PreOrderMaterials },
+        { model: models.PreOrderWorks },
+        { model: models.PreOrderServices },
       ],
+      order: [["createdAt", "DESC"]],
+      limit,
+      offset,
     });
 
     res.status(200).json({
       message: "Успешно (Заказы)",
       orders,
+      totalOrders,
+      currentPage,
+      perPage: limit,
+      totalPages,
     });
   } catch (error) {
-    console.error("Ошибка при обновлении данных:", error);
-    res.status(500).json({ message: "Ошибка при обновлении данных" });
+    console.error("❌ Ошибка при получении предзаказов:", error);
+    res.status(500).json({ message: "Ошибка при получении предзаказов" });
   }
 });
+
+// router.get("/", async (req, res) => {
+//   const { status, startDate, endDate, search } = req.query;
+
+//   try {
+//     const where = {};
+
+//     if (status) {
+//       where[status] = true;
+//     }
+
+//     if (startDate || endDate) {
+//       where.createdAt = {};
+//       if (startDate) {
+//         where.createdAt[Op.gte] = new Date(startDate);
+//       }
+//       if (endDate) {
+//         where.createdAt[Op.lte] = new Date(endDate);
+//       }
+//     }
+
+//     // Пошук
+//     if (search) {
+//       where[Op.or] = [{ phone: { [Op.like]: `%${search}%` } }];
+//     }
+
+//     const orders = await PreOrders.findAll({
+//       where,
+//       include: [
+//         {
+//           model: models.PreOrderMaterials,
+//         },
+//         {
+//           model: models.PreOrderWorks,
+//         },
+//         {
+//           model: models.PreOrderServices,
+//         },
+//       ],
+//     });
+
+//     res.status(200).json({
+//       message: "Успешно (Заказы)",
+//       orders,
+//     });
+//   } catch (error) {
+//     console.error("Ошибка при обновлении данных:", error);
+//     res.status(500).json({ message: "Ошибка при обновлении данных" });
+//   }
+// });
 
 router.get("/:id", async (req, res) => {
   const { id: orderId } = req.params;

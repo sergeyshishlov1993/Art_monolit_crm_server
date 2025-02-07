@@ -19,6 +19,8 @@ module.exports = {
         status: "Pending",
         source: "Online",
         store: "Main Store",
+        storeAddress: "Космическая 63",
+        isPublic: true,
         createdAt: new Date(),
         updatedAt: new Date(),
       },

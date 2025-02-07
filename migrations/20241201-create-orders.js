@@ -22,6 +22,8 @@ module.exports = {
       status: Sequelize.STRING,
       source: Sequelize.STRING,
       store: Sequelize.STRING,
+      storeAddress: Sequelize.STRING,
+      isPublic: Sequelize.BOOLEAN,
       createdAt: {
         type: Sequelize.DATE,
         allowNull: false,

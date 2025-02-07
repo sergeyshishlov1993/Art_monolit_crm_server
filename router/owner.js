@@ -1,7 +1,7 @@
 const express = require("express");
 const bcrypt = require("bcrypt");
 const { models } = require("../models/index");
-const { User, Role, Permission } = models;
+const { User, Role, Permission, Stores } = models;
 
 const router = express.Router();
 
@@ -69,9 +69,7 @@ router.post("/create-user", async (req, res) => {
 
     await transaction.commit();
 
-    console.log("Fetching user from DB for verification...");
     const userFromDB = await User.findOne({ where: { id: user.id } });
-    console.log("Password in DB after creation:", userFromDB.password);
 
     res.status(201).json({ message: "User created successfully", user });
   } catch (error) {
@@ -81,7 +79,6 @@ router.post("/create-user", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
 router.put("/update-user/:id", async (req, res) => {
   const { id } = req.params;
   const { name, password, roleId, address } = req.body;
@@ -278,6 +275,90 @@ router.delete("/delete-role/:id", async (req, res) => {
     console.error("Error deleting role:", error);
 
     // Відкат транзакції у разі помилки
+    await transaction.rollback();
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+router.get("/stores", async (req, res) => {
+  try {
+    const stores = await Stores.findAll({});
+
+    res.status(200).json({
+      stores: stores,
+    });
+  } catch (error) {
+    console.error("Error fetching stores:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+router.post("/create-store", async (req, res) => {
+  const { name } = req.body;
+
+  const transaction = await Stores.sequelize.transaction();
+
+  try {
+    const stores = await Stores.create(
+      {
+        name,
+      },
+      { transaction }
+    );
+
+    await transaction.commit();
+
+    res.status(201).json({ message: "new Store created successfully", stores });
+  } catch (error) {
+    console.error("Error creating user:", error);
+
+    await transaction.rollback();
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+router.put("/update-store/:id", async (req, res) => {
+  const { id } = req.params;
+  const { name } = req.body;
+
+  const transaction = await Stores.sequelize.transaction();
+
+  try {
+    const store = await Stores.findByPk(id, { transaction });
+
+    if (!store) {
+      await transaction.rollback();
+      return res.status(404).json({ error: "Store not found" });
+    }
+
+    if (name) store.name = name;
+
+    await store.save({ transaction });
+
+    await transaction.commit();
+
+    res.status(200).json({ message: "Store updated successfully", store });
+  } catch (error) {
+    console.error("Error updating user:", error);
+
+    await transaction.rollback();
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+router.delete("/delete-store/:id", async (req, res) => {
+  const { id } = req.params;
+
+  const transaction = await Stores.sequelize.transaction();
+
+  try {
+    const store = await Stores.findByPk(id, { transaction });
+
+    await store.destroy({ transaction });
+
+    await transaction.commit();
+
+    res.status(200).json({ message: "Store deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting role:", error);
+
     await transaction.rollback();
     res.status(500).json({ error: "Internal Server Error" });
   }

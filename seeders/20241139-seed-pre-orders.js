@@ -12,6 +12,7 @@ module.exports = {
           "Lorem Ipsum - это текст-рыба, часто используемый в печати и вэб-дизайне. Lorem Ipsum является стандартной  для текстов на латинице с начала XVI века. В то время некий безымянный печатник создал большую коллекцию размеров и форм шрифтов, используя Lorem Ipsum для распечатки образцов. Lorem Ipsum не только",
         name: "Product A",
         address: "123 Main St",
+        storeAddress: "Космическая 63",
         totalPrice: "100.00",
         source: "Website",
         isDraft: true,

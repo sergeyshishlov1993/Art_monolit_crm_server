@@ -6,8 +6,6 @@ require("dotenv").config();
 
 const router = express.Router();
 
-// Настройка multer для обработки файлов
-// Используем upload.array вместо upload.single
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.post("/upload", upload.array("files"), async (req, res) => {
@@ -18,7 +16,6 @@ router.post("/upload", upload.array("files"), async (req, res) => {
       return res.status(400).json({ message: "Файлы не найдены" });
     }
 
-    // Подключение к базе данных
     const connection = await mysql.createConnection({
       host: process.env.DB_HOST,
       user: process.env.DB_USER,
@@ -28,27 +25,22 @@ router.post("/upload", upload.array("files"), async (req, res) => {
 
     const uploadedFiles = [];
 
-    // Перебор всех файлов
     for (const file of files) {
-      // Загрузка каждого файла на S3
       const params = {
         Bucket: process.env.S3_BUCKET_NAME,
-        Key: `uploads/${Date.now()}_${file.originalname}`, // Уникальное имя файла
+        Key: `uploads/${Date.now()}_${file.originalname}`,
         Body: file.buffer,
         ContentType: file.mimetype,
-        ACL: "public-read", // Доступ к файлу
+        ACL: "public-read",
       };
 
       const uploadResult = await s3.upload(params).promise();
-      console.log("Файл загружен на S3:", uploadResult.Location);
 
-      // Сохранение ссылки в базе данных
       await connection.execute(
         "INSERT INTO files (file_name, file_url) VALUES (?, ?)",
         [file.originalname, uploadResult.Location]
       );
 
-      // Добавляем результат в массив
       uploadedFiles.push({
         fileName: file.originalname,
         fileUrl: uploadResult.Location,
@@ -59,7 +51,7 @@ router.post("/upload", upload.array("files"), async (req, res) => {
 
     res.status(200).json({
       message: "Файлы успешно загружены",
-      files: uploadedFiles, // Возвращаем массив загруженных файлов
+      files: uploadedFiles,
     });
   } catch (error) {
     console.error("Ошибка при загрузке файлов:", error);

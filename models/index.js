@@ -28,6 +28,7 @@ models.Permission = require("./Permission")(sequelize, DataTypes);
 models.Role = require("./Role")(sequelize, DataTypes);
 models.UserRole = require("./UserRole")(sequelize, DataTypes);
 models.RolePermission = require("./RolePermission")(sequelize, DataTypes);
+models.Stores = require("./Stores")(sequelize, DataTypes);
 
 models.User.belongsToMany(models.Role, {
   through: models.UserRole,

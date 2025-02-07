@@ -3,12 +3,13 @@ const app = express();
 const cors = require("cors");
 
 require("dotenv").config();
+
 const s3 = require("./s3Config");
 
 const arrival = require("./router/arrival");
 const defective = require("./router/defective");
 const materials = require("./router/materials");
-const orders = require("./router/orders");
+const orders = require("./router/orderRoutes");
 
 const ownerRoutes = require("./router/owner");
 const permissionRoutes = require("./router/permissions");
