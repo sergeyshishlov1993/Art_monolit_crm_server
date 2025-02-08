@@ -1,8 +1,5 @@
 name: CI/CD Pipeline
 
-on:
-  workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -19,11 +16,11 @@ jobs:
         with:
           node-version: 18
 
-      - name: Install dependencies 123
+      - name: Install dependencies
         run: npm install
 
-      - name: Build project 123
+      - name: Build project
         run: npm run build
 
-      - name: Run Application 123
+      - name: Run Application
         run: node index.js &
