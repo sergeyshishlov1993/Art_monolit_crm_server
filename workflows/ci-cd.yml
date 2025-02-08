@@ -1,7 +1,10 @@
 name: CI/CD Pipeline
 
 on:
-  workflow_dispatch: # Enables manual execution from GitHub UI
+  workflow_dispatch: # Enables manual execution
+  push: # Runs pipeline on every push
+    branches:
+      - main # Runs only when pushing to the "main" branch
 
 jobs:
   build:
