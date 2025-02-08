@@ -19,11 +19,11 @@ jobs:
         with:
           node-version: 18
 
-      - name: Install dependencies
+      - name: Install dependencies 123
         run: npm install
 
-      - name: Build project
+      - name: Build project 123
         run: npm run build
 
-      - name: Run Application
+      - name: Run Application 123
         run: node index.js &
