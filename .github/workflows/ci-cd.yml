@@ -1,10 +1,10 @@
 name: CI/CD Pipeline
 
 on:
-  workflow_dispatch: # Enables manual execution
-  push: # Runs pipeline on every push
+  workflow_dispatch:
+  push:
     branches:
-      - main # Runs only when pushing to the "main" branch
+      - main
 
 jobs:
   build:
@@ -17,16 +17,22 @@ jobs:
       - name: Verify Code Exists
         run: ls -la
 
+      - name: Verify package.json
+        run: cat package.json
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 18
 
+      - name: Clean npm cache
+        run: npm cache clean --force
+
       - name: Install dependencies
         run: npm install
 
-      - name: Build project
-        run: npm run build
+      - name: Show installed packages
+        run: npm list --depth=0
 
-      - name: Run Application
-        run: node index.js &
+      - name: Start Application
+        run: npm run start
