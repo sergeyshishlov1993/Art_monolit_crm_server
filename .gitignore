@@ -37,4 +37,4 @@ coverage
 *.sw?
 
 # TypeScript build info files
-*.tsbuildinfo
+*.tsbuildinfoconfig/config.js

@@ -4,7 +4,10 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon --inspect index.js"
+    "start": "nodemon --inspect index.js",
+    "migrate": "npx sequelize db:migrate --config=config/config.js",
+    "seed": "npx sequelize db:seed:all --config=config/config.js",
+    "undo": "npx sequelize db:migrate:undo:all --config=config/config.js"
   },
   "keywords": [],
   "author": "",
