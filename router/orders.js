@@ -549,7 +549,13 @@ router.post("/create", upload.array("photos"), async (req, res) => {
     📝 <b>Назва замовлення:</b> ${order.name}\n
     👤 <b>Замовник:</b> ${order.first_name} ${order.second_name}\n
     📞 <b>Телефон:</b> ${order.phone}\n
-    🕒 <b>Дата зміни:</b> ${new Date().toLocaleString()}\n
+   🕒 <b>Дата изменения:</b> ${new Date().toLocaleString("ru-RU", {
+     year: "numeric",
+     month: "long",
+     day: "numeric",
+     hour: "2-digit",
+     minute: "2-digit",
+   })}\n
     🔄 <b>Новий статус:</b> ${selectStatus(order.status)}\n
     💳 <b>Предоплата:</b> ${order.prepayment}₴\n
     💵 <b>К оплате:</b> ${order.totalPrice}₴\n
