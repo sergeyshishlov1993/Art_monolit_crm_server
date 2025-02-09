@@ -45,5 +45,12 @@ jobs:
       - name: Show installed packages
         run: npm list --depth=0
 
-      - name: Start Application
-        run: npm run start
+      - name: Start Application (Ignore Only 409 Conflict)
+        run: |
+          npm run start 2>&1 | tee output.log || true
+          if grep -q "ETELEGRAM: 409 Conflict" output.log; then
+            echo "⚠️ Ignoring 409 Conflict error"
+          else
+            echo "❌ An unexpected error occurred"
+            exit 1
+          fi

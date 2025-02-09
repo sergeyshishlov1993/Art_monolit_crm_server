@@ -7,7 +7,6 @@ const {
   warehouseChatIds,
 } = require("../middleware/bots");
 
-// 📢 Функція для відправки оновлень по замовленням
 async function sendOrderUpdateMessage(message, type) {
   const targetChatIds = type === "status" ? statusChatIds : orderChatIds;
   const bot = type === "status" ? botStatus : botOrders;
@@ -21,7 +20,6 @@ async function sendOrderUpdateMessage(message, type) {
   }
 }
 
-// 📢 Функція для відправки повідомлень про нестачу матеріалів
 async function sendLowStockNotification(materialName, requiredQuantity) {
   const message = `
     ⚠️ <b>На складе заканчивается:</b> ${materialName}\n 

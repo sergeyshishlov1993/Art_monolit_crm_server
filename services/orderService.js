@@ -54,7 +54,6 @@ async function createOrder(
     await handleOrderWorks(orderWorks, order.id, transaction);
     await handleOrderServices(orderServices, order.id, transaction);
 
-    // Проверяем и создаем недостающие материалы
     for (const material of orderMaterials) {
       if (material.deficit > 0) {
         await createMissingMaterial(material, material.deficit, transaction);
@@ -73,7 +72,20 @@ async function createOrder(
     }
 
     await transaction.commit();
-    sendOrderUpdateMessage(`📦 Новый заказ создан: ${order.name}`, "orders");
+
+    const message = `
+    📦 <b>Добавлен новый заказ</b>\n
+    📝 <b>Назва замовлення:</b> ${order.name}\n
+    👤 <b>Замовник:</b> ${order.first_name} ${order.second_name}\n
+    📞 <b>Телефон:</b> ${order.phone}\n
+    🕒 <b>Дата зміни:</b> ${new Date().toLocaleString()}\n
+    🔄 <b>Новий статус:</b> ${selectStatus(order.status)}\n
+    💳 <b>Предоплата:</b> ${order.prepayment}₴\n
+    💵 <b>К оплате:</b> ${order.totalPrice}₴\n
+    💻 <b>Источник:</b> ${order.source}\n
+
+        `;
+    sendOrderUpdateMessage(message, "orders");
     return { success: true, order };
   } catch (error) {
     await transaction.rollback();
