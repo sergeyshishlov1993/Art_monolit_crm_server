@@ -46,7 +46,6 @@ async function createOrder(
     const lastOrder = await Orders.findOne({
       where: { storeAddress: orderData.storeAddress },
       order: [["createdAt", "DESC"]],
-      lock: transaction.LOCK.UPDATE,
       transaction,
     });
 
