@@ -418,9 +418,16 @@ router.get("/", async (req, res) => {
 
     const totalOrders = await Orders.count({ where });
 
+    const totalOrdersByStore = storeAddress
+      ? await Orders.count({
+          where: { storeAddress: { [Op.like]: `%${storeAddress}%` } },
+        })
+      : await Orders.count();
+
     if (totalOrders === 0) {
       return res.status(200).json({
         message: "Успешно (Заказы)",
+        totalOrdersByStore,
         orders: [],
         totalOrders: 0,
         currentPage,
@@ -448,6 +455,8 @@ router.get("/", async (req, res) => {
       offset,
     });
 
+    console.log(totalOrdersByStore);
+
     res.status(200).json({
       message: "Успешно (Заказы)",
       orders,
@@ -455,6 +464,7 @@ router.get("/", async (req, res) => {
       currentPage,
       perPage: limit,
       totalPages,
+      totalOrdersByStore,
     });
   } catch (error) {
     console.error("❌ Ошибка при получении заказов:", error);
@@ -518,6 +528,27 @@ router.post("/create", upload.array("photos"), async (req, res) => {
   const transaction = await Orders.sequelize.transaction();
 
   try {
+    // const lastOrder = await Orders.findOne({
+    //   where: { storeAddress: orderData.storeAddress },
+    //   order: [["createdAt", "DESC"]],
+    //   transaction, // Читаем в той же транзакции
+    // });
+
+    // console.log("lastOrder", lastOrder);
+
+    // let lastNumber = 0;
+    // if (lastOrder && lastOrder.order_number) {
+    //   const match = lastOrder.order_number.match(/\d+$/);
+    //   lastNumber = match ? parseInt(match[0], 10) : 0;
+    // }
+
+    // const storePrefix = orderData.storeAddress
+    //   ? orderData.store.slice(0, 2).toLowerCase()
+    //   : "xx";
+    // orderData.order_number = `${storePrefix}-${lastNumber + 1}`;
+
+    // console.log("✅ Сгенерирован order_number:", orderData.order_number);
+
     const order = await Orders.create(orderData, { transaction });
 
     await OrderStatuses.create(

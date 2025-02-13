@@ -6,7 +6,6 @@ module.exports = {
   up: async (queryInterface, Sequelize) => {
     const adminRoleId = uuidv4();
 
-    // Додавання ролі Admin
     await queryInterface.bulkInsert("Roles", [
       {
         id: adminRoleId,
@@ -137,14 +136,13 @@ module.exports = {
         id: adminUserId,
         name: "Владелец",
         password: await bcrypt.hash("123456", 10),
-        address: "Космическая 63",
+        address: "Все магазины",
         isOwner: true,
         createdAt: new Date(),
         updatedAt: new Date(),
       },
     ]);
 
-    // Прив'язка ролі Admin до адміністратора
     await queryInterface.bulkInsert("UserRoles", [
       {
         id: uuidv4(),

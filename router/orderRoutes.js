@@ -9,6 +9,7 @@ const {
   getOrderById,
   updateOrder,
   deleteOrder,
+  getOrdersWithTotal,
 } = require("../services/orderService");
 const { updateOrderStatus } = require("../services/statusService");
 
@@ -76,6 +77,16 @@ router.get("/", async (req, res) => {
   } catch (error) {
     console.error("Ошибка при получении заказов:", error);
     res.status(500).json({ message: "Ошибка при получении заказов" });
+  }
+});
+
+router.get("/calc-orders", async (req, res) => {
+  try {
+    const result = await getOrdersWithTotal(req.query);
+    res.json(result);
+  } catch (error) {
+    console.error("Ошибка при получении заказов:", error);
+    res.status(500).json({ error: "Ошибка сервера" });
   }
 });
 

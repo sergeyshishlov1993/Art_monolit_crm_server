@@ -19,9 +19,13 @@ module.exports = (sequelize) => {
     sale: Sequelize.STRING,
     status: Sequelize.STRING,
     source: Sequelize.STRING,
-    store: Sequelize.STRING,
     storeAddress: Sequelize.STRING,
     isPublic: Sequelize.BOOLEAN,
+
+    order_number: {
+      type: Sequelize.STRING,
+      allowNull: false,
+    },
 
     createdAt: {
       type: Sequelize.DATE,

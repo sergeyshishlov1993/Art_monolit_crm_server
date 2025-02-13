@@ -43,6 +43,24 @@ async function createOrder(
 ) {
   const transaction = await Orders.sequelize.transaction();
   try {
+    const lastOrder = await Orders.findOne({
+      where: { storeAddress: orderData.storeAddress },
+      order: [["createdAt", "DESC"]],
+      lock: transaction.LOCK.UPDATE,
+      transaction,
+    });
+
+    let lastNumber = 0;
+    if (lastOrder && lastOrder.order_number) {
+      const match = lastOrder.order_number.match(/\d+$/);
+      lastNumber = match ? parseInt(match[0], 10) : 0;
+    }
+
+    const storePrefix = orderData.storeAddress
+      ? orderData.storeAddress.slice(0, 2).toLowerCase()
+      : "xx";
+    orderData.order_number = `${storePrefix}-${lastNumber + 1}`;
+
     const order = await Orders.create(orderData, { transaction });
     await OrderStatuses.create(
       { parentId: order.id, new: true },
@@ -123,6 +141,7 @@ async function getOrders(query) {
       storeAddress,
       page = 1,
       per_page = 10,
+      source,
     } = query;
     const where = {};
     const limit = parseInt(per_page) || 10;
@@ -139,15 +158,20 @@ async function getOrders(query) {
       where.status = status;
     }
 
+    if (source && source !== "all") {
+      where.source = source;
+    }
+
     if (search) {
       where[Op.or] = [
+        { order_number: { [Op.like]: `%${search}%` } },
         { phone: { [Op.like]: `%${search}%` } },
         { first_name: { [Op.like]: `%${search}%` } },
         { second_name: { [Op.like]: `%${search}%` } },
       ];
     }
 
-    if (storeAddress) {
+    if (storeAddress && storeAddress !== "Все магазины") {
       where.storeAddress = { [Op.like]: `%${storeAddress}%` };
     }
 
@@ -193,6 +217,40 @@ async function getOrderById(orderId) {
       ],
     });
   } catch (error) {
+    throw error;
+  }
+}
+
+async function getOrdersWithTotal(query) {
+  try {
+    const { startDate, endDate, storeAddress, source } = query;
+
+    const where = {};
+
+    if (startDate && endDate) {
+      const start = new Date(`${startDate}T00:00:00.000Z`);
+      const end = new Date(`${endDate}T23:59:59.999Z`);
+      where.createdAt = { [Op.between]: [start, end] };
+    }
+
+    if (storeAddress && storeAddress !== "Все магазины") {
+      where.storeAddress = { [Op.like]: `%${storeAddress}%` };
+    }
+
+    if (source && source !== "all") {
+      where.source = source;
+    }
+
+    const totalSum = await Orders.sum("totalPrice", { where });
+
+    const totalOrders = await Orders.count({ where });
+
+    return {
+      totalOrders,
+      totalSum: totalSum || 0,
+    };
+  } catch (error) {
+    console.error("Ошибка в getOrdersWithTotal:", error);
     throw error;
   }
 }
@@ -363,6 +421,7 @@ module.exports = {
   createOrder,
   getOrders,
   getOrderById,
+  getOrdersWithTotal,
   updateOrder,
   deleteOrder,
 };

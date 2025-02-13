@@ -57,45 +57,68 @@ router.put("/update/:id", async (req, res) => {
     const { id } = req.params;
     const { item } = req.body;
 
-    const existingItem = await Warehouse.findByPk(id);
+    const existingItem = await Warehouse.findByPk(id, { transaction });
 
     if (!existingItem) {
+      console.log("❌ Товар не найден!");
       await transaction.rollback();
-      return res.status(404).json({
-        message: "Товар не найден",
-      });
+      return res.status(404).json({ message: "Товар не найден" });
     }
 
-    const isDefective = item.defective || 0;
+    const newDefective = item.defective || 0;
 
-    const updatedItem = await existingItem.update(item, { transaction });
-
-    const defectiveRecord = await Defective.findOne({
+    let defectiveRecord = await Defective.findOne({
       where: { warehouseId: id },
       transaction,
     });
 
-    if (isDefective > 0) {
+    const previousDefective = existingItem.defective || 0;
+    const previousDefectiveQuantity = defectiveRecord
+      ? defectiveRecord.quantity
+      : 0;
+
+    let defectiveDifference = newDefective - previousDefectiveQuantity;
+
+    await existingItem.update(item, { transaction });
+
+    let newQuantity = existingItem.quantity;
+
+    if (defectiveDifference > 0) {
+      if (newQuantity - defectiveDifference < 0) {
+        defectiveDifference = newQuantity;
+        newQuantity = 0;
+      } else {
+        newQuantity -= defectiveDifference;
+      }
+    }
+
+    await existingItem.update(
+      {
+        quantity: newQuantity,
+        defective: newDefective,
+      },
+      { transaction }
+    );
+
+    if (newDefective > 0) {
       if (!defectiveRecord) {
-        await Defective.create(
+        defectiveRecord = await Defective.create(
           {
             warehouseId: id,
-            name: updatedItem.name,
-            length: updatedItem.length,
-            width: updatedItem.width,
-            thickness: updatedItem.thickness,
-            priceM2: updatedItem.priceM2,
-            price: updatedItem.price,
-            weight: updatedItem.weight,
-            quantity: isDefective,
+            name: existingItem.name,
+            length: existingItem.length,
+            width: existingItem.width,
+            thickness: existingItem.thickness,
+            priceM2: existingItem.priceM2,
+            price: existingItem.price,
+            weight: existingItem.weight,
+            quantity: newDefective,
           },
           { transaction }
         );
-      } else if (defectiveRecord.quantity !== isDefective) {
+      } else {
         await defectiveRecord.update(
-          {
-            quantity: isDefective,
-          },
+          { quantity: newDefective },
           { transaction }
         );
       }
@@ -107,12 +130,11 @@ router.put("/update/:id", async (req, res) => {
 
     res.status(200).json({
       message: "Товар успешно обновлён!",
-      item: updatedItem,
+      item: existingItem,
     });
   } catch (error) {
     await transaction.rollback();
-
-    console.error("Ошибка при обновлении товара:", error);
+    console.error("❌ Ошибка при обновлении товара:", error);
     res.status(500).json({
       message: "Ошибка при обновлении товара",
       error: error.message,
