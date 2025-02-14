@@ -15,7 +15,7 @@ const { Op } = require("sequelize");
 async function handleOrderDeads(orderDeads, parentId, transaction) {
   if (orderDeads && orderDeads.length > 0) {
     for (const dead of orderDeads) {
-      await OrderDeads.create({ ...dead, parentId }, { transaction });
+      await OrderDeads.upsert({ ...dead, parentId }, { transaction });
     }
   }
 }
@@ -23,7 +23,7 @@ async function handleOrderDeads(orderDeads, parentId, transaction) {
 async function handleOrderServices(orderServices, parentId, transaction) {
   if (orderServices && orderServices.length > 0) {
     for (const service of orderServices) {
-      await OrderServices.create({ ...service, parentId }, { transaction });
+      await OrderServices.upsert({ ...service, parentId }, { transaction });
     }
   }
 }
@@ -31,7 +31,7 @@ async function handleOrderServices(orderServices, parentId, transaction) {
 async function handleOrderWorks(orderWorks, parentId, transaction) {
   if (orderWorks && orderWorks.length > 0) {
     for (const work of orderWorks) {
-      await OrderWorks.create({ ...work, parentId }, { transaction });
+      await OrderWorks.upsert({ ...work, parentId }, { transaction });
     }
   }
 }

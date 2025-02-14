@@ -7,10 +7,11 @@ const {
   createOrder,
   getOrders,
   getOrderById,
-  updateOrder,
+  // updateOrder,
   deleteOrder,
   getOrdersWithTotal,
 } = require("../services/orderService");
+const { updateOrder } = require("../services/updateOrder");
 const { updateOrderStatus } = require("../services/statusService");
 
 const router = Router();
@@ -151,14 +152,46 @@ router.put("/update/:id", upload.array("photos"), async (req, res) => {
       orderServices,
       rowsPhotos
     );
-    res
-      .status(200)
-      .json({ message: "Заказ успешно обновлен", order: result.order });
+    if (result.success) {
+      return res
+        .status(200)
+        .json({ message: "Заказ успішно оновлено", order: result.order });
+    }
+    return res.status(400).json({ message: result.error });
   } catch (error) {
-    console.error("Ошибка при обновлении заказа:", error);
-    res.status(500).json({ message: "Ошибка при обновлении заказа" });
+    console.error("Помилка при оновленні замовлення:", error);
+    res.status(500).json({ message: "Помилка при оновленні замовлення" });
   }
 });
+
+// router.put("/update/:id", upload.array("photos"), async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const {
+//       orderData,
+//       orderDeads,
+//       orderMaterials,
+//       orderWorks,
+//       orderServices,
+//       rowsPhotos,
+//     } = req.body;
+//     const result = await updateOrder(
+//       id,
+//       orderData,
+//       orderDeads,
+//       orderMaterials,
+//       orderWorks,
+//       orderServices,
+//       rowsPhotos
+//     );
+//     res
+//       .status(200)
+//       .json({ message: "Заказ успешно обновлен", order: result.order });
+//   } catch (error) {
+//     console.error("Ошибка при обновлении заказа:", error);
+//     res.status(500).json({ message: "Ошибка при обновлении заказа" });
+//   }
+// });
 
 router.put("/change-status-order", async (req, res) => {
   try {
