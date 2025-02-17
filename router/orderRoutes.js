@@ -7,7 +7,6 @@ const {
   createOrder,
   getOrders,
   getOrderById,
-  // updateOrder,
   deleteOrder,
   getOrdersWithTotal,
 } = require("../services/orderService");
@@ -163,35 +162,6 @@ router.put("/update/:id", upload.array("photos"), async (req, res) => {
     res.status(500).json({ message: "Помилка при оновленні замовлення" });
   }
 });
-
-// router.put("/update/:id", upload.array("photos"), async (req, res) => {
-//   try {
-//     const { id } = req.params;
-//     const {
-//       orderData,
-//       orderDeads,
-//       orderMaterials,
-//       orderWorks,
-//       orderServices,
-//       rowsPhotos,
-//     } = req.body;
-//     const result = await updateOrder(
-//       id,
-//       orderData,
-//       orderDeads,
-//       orderMaterials,
-//       orderWorks,
-//       orderServices,
-//       rowsPhotos
-//     );
-//     res
-//       .status(200)
-//       .json({ message: "Заказ успешно обновлен", order: result.order });
-//   } catch (error) {
-//     console.error("Ошибка при обновлении заказа:", error);
-//     res.status(500).json({ message: "Ошибка при обновлении заказа" });
-//   }
-// });
 
 router.put("/change-status-order", async (req, res) => {
   try {

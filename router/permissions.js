@@ -3,13 +3,11 @@ const router = express.Router();
 const { checkPermission } = require("../middleware/checkPermission");
 const { models } = require("../models/index");
 
-// Отримати всі дозволи
 router.get("/", checkPermission("can_read_permissions"), async (req, res) => {
   const permissions = await models.Permission.findAll();
   res.json(permissions);
 });
 
-// Створити новий дозвіл
 router.post(
   "/",
   checkPermission("can_create_permissions"),
@@ -20,7 +18,6 @@ router.post(
   }
 );
 
-// Оновити дозвіл
 router.put(
   "/:id",
   checkPermission("can_edit_permissions"),
@@ -36,7 +33,6 @@ router.put(
   }
 );
 
-// Видалити дозвіл
 router.delete(
   "/:id",
   checkPermission("can_delete_permissions"),

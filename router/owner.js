@@ -274,7 +274,6 @@ router.delete("/delete-role/:id", async (req, res) => {
   } catch (error) {
     console.error("Error deleting role:", error);
 
-    // Відкат транзакції у разі помилки
     await transaction.rollback();
     res.status(500).json({ error: "Internal Server Error" });
   }

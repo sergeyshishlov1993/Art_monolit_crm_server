@@ -7,9 +7,8 @@ const { User, RefreshToken, Role, Permission } = models;
 
 const router = express.Router();
 const SECRET_KEY = process.env.SECRET_KEY;
-const REFRESH_SECRET_KEY = `${SECRET_KEY}_refresh`; // Дополнительный ключ для Refresh токенов
+const REFRESH_SECRET_KEY = `${SECRET_KEY}_refresh`;
 
-// Временное хранилище для заблокированных токенов (в продакшене использовать Redis или базу данных)
 const blacklistedTokens = new Set();
 
 router.post("/login", async (req, res) => {
@@ -39,17 +38,14 @@ router.post("/login", async (req, res) => {
       role.Permissions.map((permission) => permission.key)
     );
 
-    // Генерація access токена
     const accessToken = jwt.sign({ id: user.id, permissions }, SECRET_KEY, {
       expiresIn: "1h",
     });
 
-    // Генерація refresh токена
     const refreshToken = jwt.sign({ id: user.id }, REFRESH_SECRET_KEY, {
       expiresIn: "7d",
     });
 
-    // Збереження refresh токена в базу
     await RefreshToken.create({ token: refreshToken, userId: user.id });
 
     res.json({ accessToken, refreshToken, permissions, user });
@@ -59,7 +55,6 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// Логаут пользователя
 router.post("/logout", async (req, res) => {
   const { token, refreshToken } = req.body;
 
@@ -77,7 +72,6 @@ router.post("/logout", async (req, res) => {
   }
 });
 
-// Обновление токенов
 router.post("/refresh", async (req, res) => {
   const { refreshToken } = req.body;
 
@@ -86,7 +80,6 @@ router.post("/refresh", async (req, res) => {
   }
 
   try {
-    // Проверяем, существует ли Refresh Token в базе
     const tokenEntry = await RefreshToken.findOne({
       where: { token: refreshToken },
     });
@@ -94,10 +87,8 @@ router.post("/refresh", async (req, res) => {
       return res.status(403).json({ error: "Invalid Refresh Token" });
     }
 
-    // Проверяем валидность Refresh Token
     const decoded = jwt.verify(refreshToken, REFRESH_SECRET_KEY);
 
-    // Генерация нового Access Token
     const accessToken = jwt.sign({ id: decoded.id }, SECRET_KEY, {
       expiresIn: "15m",
     });
@@ -109,7 +100,6 @@ router.post("/refresh", async (req, res) => {
   }
 });
 
-// Защищенный маршрут (проверка Access Token)
 router.get("/me", async (req, res) => {
   const token = req.headers["authorization"]?.split(" ")[1];
   if (!token) {

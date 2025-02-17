@@ -1,7 +1,7 @@
 const { v4: uuidv4 } = require("uuid");
 const { Orders, OrderPhotoLinks } = require("../models/index").models;
 const { deleteFileFromS3 } = require("./photoService");
-const { handleOrderMaterials } = require("../services/materialService"); // або як у вас імпортується
+const { handleOrderMaterials } = require("../services/materialService");
 const { sendOrderUpdateMessage } = require("../services/notificationService");
 const {
   handleOrderDeads,
@@ -24,13 +24,9 @@ async function getNewUploadedFiles(rowsPhotos) {
   return result;
 }
 
-async function deleteRelatedData(parentId, transaction) {
-  // Ваш код видалення пов'язаних даних
-}
+async function deleteRelatedData(parentId, transaction) {}
 
 async function processPhotos(id, rowsPhotos, oldPhotos) {
-  // Окрема транзакція (опційно) для роботи з фото
-  // Якщо потрібна “атомарність” з оновленням замовлення — робіть у загальному блоку
   const photoTransaction = await Orders.sequelize.transaction();
   try {
     const newPhotos = [
@@ -44,7 +40,6 @@ async function processPhotos(id, rowsPhotos, oldPhotos) {
       if (photo.fileKey) await deleteFileFromS3(photo.fileKey);
     }
 
-    // Видалити зі зв'язувальної таблиці зайві записи
     await OrderPhotoLinks.destroy({
       where: { parentId: id, id: photosToDelete.map((p) => p.id) },
       transaction: photoTransaction,
@@ -88,20 +83,17 @@ async function updateOrder(
   orderServices,
   rowsPhotos
 ) {
-  // 1. Збір попередніх даних поза транзакцією
   const order = await Orders.findByPk(id);
   if (!order) return { success: false, error: "Заказ не найден" };
 
   const oldPhotos = await OrderPhotoLinks.findAll({ where: { parentId: id } });
   const newUploadedFiles = await getNewUploadedFiles(rowsPhotos);
 
-  // 2. Коротка транзакція для оновлення замовлення та підлеглих сутностей
   const mainTransaction = await Orders.sequelize.transaction();
   try {
     await order.update(orderData, { transaction: mainTransaction });
     await deleteRelatedData(id, mainTransaction);
 
-    // Списання/повернення/оновлення
     await handleOrderDeads(orderDeads, id, mainTransaction);
     await handleOrderMaterials(orderMaterials, id, mainTransaction, true);
     await handleOrderWorks(orderWorks, id, mainTransaction);
@@ -111,7 +103,6 @@ async function updateOrder(
   } catch (error) {
     console.error("❌ Помилка при оновленні замовлення:", error);
 
-    // Якщо треба відкочувати S3
     for (const fileKey of newUploadedFiles) {
       try {
         await deleteFileFromS3(fileKey);
@@ -124,17 +115,16 @@ async function updateOrder(
     return { success: false, error: "Помилка при оновленні замовлення" };
   }
 
-  // 3. Оновлення фото (опційно — в окремому блоці)
   try {
     if (rowsPhotos) {
       await processPhotos(id, rowsPhotos, oldPhotos);
     }
-    // Надсилаємо повідомлення
+
     sendOrderUpdateMessage(`✏️ Заказ #${order.name} оновлено`, "orders");
     return { success: true, order };
   } catch (error) {
     console.error("⚠️ Помилка при обробці фотографій:", error);
-    // За потреби — видаляємо завантажені фото із S3
+
     for (const fileKey of newUploadedFiles) {
       try {
         await deleteFileFromS3(fileKey);

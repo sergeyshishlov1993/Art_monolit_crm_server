@@ -109,56 +109,6 @@ router.get("/", async (req, res) => {
   }
 });
 
-// router.get("/", async (req, res) => {
-//   const { status, startDate, endDate, search } = req.query;
-
-//   try {
-//     const where = {};
-
-//     if (status) {
-//       where[status] = true;
-//     }
-
-//     if (startDate || endDate) {
-//       where.createdAt = {};
-//       if (startDate) {
-//         where.createdAt[Op.gte] = new Date(startDate);
-//       }
-//       if (endDate) {
-//         where.createdAt[Op.lte] = new Date(endDate);
-//       }
-//     }
-
-//     // Пошук
-//     if (search) {
-//       where[Op.or] = [{ phone: { [Op.like]: `%${search}%` } }];
-//     }
-
-//     const orders = await PreOrders.findAll({
-//       where,
-//       include: [
-//         {
-//           model: models.PreOrderMaterials,
-//         },
-//         {
-//           model: models.PreOrderWorks,
-//         },
-//         {
-//           model: models.PreOrderServices,
-//         },
-//       ],
-//     });
-
-//     res.status(200).json({
-//       message: "Успешно (Заказы)",
-//       orders,
-//     });
-//   } catch (error) {
-//     console.error("Ошибка при обновлении данных:", error);
-//     res.status(500).json({ message: "Ошибка при обновлении данных" });
-//   }
-// });
-
 router.get("/:id", async (req, res) => {
   const { id: orderId } = req.params;
 

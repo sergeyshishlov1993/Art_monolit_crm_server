@@ -140,7 +140,6 @@ router.delete("/delete/:id", async (req, res) => {
       return res.status(404).json({ message: "Материал не найден" });
     }
 
-    // Удаляем запись
     await material.destroy({ transaction });
 
     await transaction.commit();
@@ -157,7 +156,6 @@ router.delete("/clear", async (req, res) => {
   const transaction = await Materials.sequelize.transaction();
 
   try {
-    // Удаляем все записи из таблицы Materials
     await Materials.destroy({ where: {}, transaction });
 
     await transaction.commit();
