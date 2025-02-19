@@ -12,7 +12,18 @@ router.get("/", async (req, res) => {
     const where = {};
 
     if (search) {
-      where[Op.or] = [{ name: { [Op.like]: `%${search}%` } }];
+      const searchTerms = search
+        .split(" ")
+        .filter((term) => term.trim() !== "");
+
+      where[Op.and] = searchTerms.map((term) => ({
+        [Op.or]: [
+          { name: { [Op.like]: `%${term}%` } },
+          { length: { [Op.like]: `%${term}%` } },
+          { width: { [Op.like]: `%${term}%` } },
+          { thickness: { [Op.like]: `%${term}%` } },
+        ],
+      }));
     }
 
     const warehouse = await Warehouse.findAll({ where });
