@@ -233,7 +233,7 @@ async function getOrdersWithTotal(query) {
     }
 
     if (storeAddress && storeAddress !== "Все магазины") {
-      where.storeAddress = { [Op.like]: `%${storeAddress}%` };
+      where.storeAddress = storeAddress;
     }
 
     if (source && source !== "all") {
