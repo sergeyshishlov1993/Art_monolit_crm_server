@@ -171,7 +171,7 @@ async function getOrders(query) {
     }
 
     if (storeAddress && storeAddress !== "Все магазины") {
-      where.storeAddress = { [Op.like]: `%${storeAddress}%` };
+      where.storeAddress = storeAddress;
     }
 
     const totalOrders = await Orders.count({ where });
