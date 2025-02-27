@@ -7,6 +7,7 @@ const {
   handleOrderDeads,
   handleOrderServices,
   handleOrderWorks,
+  deleteRelatedData,
 } = require("./otherInfoOrder");
 async function getNewUploadedFiles(rowsPhotos) {
   const result = [];
@@ -23,8 +24,6 @@ async function getNewUploadedFiles(rowsPhotos) {
   }
   return result;
 }
-
-async function deleteRelatedData(parentId, transaction) {}
 
 async function processPhotos(id, rowsPhotos, oldPhotos) {
   const photoTransaction = await Orders.sequelize.transaction();

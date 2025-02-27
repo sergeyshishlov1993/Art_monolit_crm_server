@@ -21,14 +21,9 @@ const {
   handleOrderDeads,
   handleOrderServices,
   handleOrderWorks,
-  deleteRelatedData,
 } = require("./otherInfoOrder");
 const { sendOrderUpdateMessage } = require("./notificationService");
-const {
-  handleOrderPhotos,
-  deleteFileFromS3,
-  deleteOrderPhotos,
-} = require("./photoService");
+const { handleOrderPhotos, deleteFileFromS3 } = require("./photoService");
 const { selectStatus, updateOrderStatus } = require("./statusService");
 const { v4: uuidv4 } = require("uuid");
 const { Op } = require("sequelize");
@@ -254,127 +249,6 @@ async function getOrdersWithTotal(query) {
   }
 }
 
-async function getNewUploadedFiles(rowsPhotos) {
-  const newPhotos = [
-    ...(rowsPhotos.carvings || []),
-    ...(rowsPhotos.artistic || []),
-  ];
-
-  return newPhotos.filter((photo) => photo.key).map((photo) => photo.key);
-}
-
-async function updateOrder(
-  id,
-  orderData,
-  orderDeads,
-  orderMaterials,
-  orderWorks,
-  orderServices,
-  rowsPhotos
-) {
-  const transaction = await Orders.sequelize.transaction();
-  const newUploadedFiles = await getNewUploadedFiles(rowsPhotos);
-  const newPhotoIds = [];
-
-  try {
-    const order = await Orders.findByPk(id);
-    if (!order) {
-      return { success: false, error: "Заказ не найден" };
-    }
-
-    await order.update(orderData, { transaction });
-
-    await deleteRelatedData(id, transaction);
-    await handleOrderDeads(orderDeads, id, transaction);
-    await handleOrderMaterials(orderMaterials, id, transaction, true);
-    await handleOrderWorks(orderWorks, id, transaction);
-    await handleOrderServices(orderServices, id, transaction);
-
-    const oldPhotos = await OrderPhotoLinks.findAll({
-      where: { parentId: id },
-      transaction,
-    });
-
-    const newPhotos = [
-      ...(rowsPhotos.carvings || []),
-      ...(rowsPhotos.artistic || []),
-    ];
-
-    const newPhotoIdsSet = new Set(
-      newPhotos.map((photo) => photo.id).filter(Boolean)
-    );
-
-    const photosToDelete = oldPhotos.filter(
-      (photo) => !newPhotoIdsSet.has(photo.id)
-    );
-
-    for (const photo of photosToDelete) {
-      if (photo.fileKey) {
-        await deleteFileFromS3(photo.fileKey);
-      }
-    }
-
-    await OrderPhotoLinks.destroy({
-      where: {
-        parentId: id,
-        id: photosToDelete.map((photo) => photo.id),
-      },
-      transaction,
-    });
-
-    for (const photo of newPhotos) {
-      if (!photo.key) {
-        console.warn("⚠️ Пропущено фото без key:", photo);
-        continue;
-      }
-
-      const photoId = photo.id || uuidv4();
-      newPhotoIds.push(photoId);
-
-      await OrderPhotoLinks.upsert(
-        {
-          id: photoId,
-          parentId: id,
-          url: photo.url,
-          fileKey: photo.key,
-          description: photo.description || null,
-          type: photo.type,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        { transaction }
-      );
-    }
-
-    await transaction.commit();
-
-    sendOrderUpdateMessage(`✏️ Заказ #${order.name} обновлен`, "orders");
-    return { success: true, order };
-  } catch (error) {
-    console.error("❌ Ошибка при обновлении заказа:", error);
-
-    for (const fileKey of newUploadedFiles) {
-      try {
-        await deleteFileFromS3(fileKey);
-      } catch (s3Error) {
-        console.error(`⚠️ Ошибка удаления фото ${fileKey} из S3:`, s3Error);
-      }
-    }
-
-    if (newPhotoIds.length > 0) {
-      try {
-        await OrderPhotoLinks.destroy({
-          where: { id: newPhotoIds },
-        });
-      } catch (dbError) {
-        console.error("⚠️ Ошибка удаления записей OrderPhotoLinks:", dbError);
-      }
-    }
-
-    return { success: false, error: "Ошибка при обновлении заказа" };
-  }
-}
-
 async function deleteOrder(orderId) {
   const transaction = await Orders.sequelize.transaction();
   try {
@@ -388,7 +262,7 @@ async function deleteOrder(orderId) {
 
     await returnMaterialsToWarehouse(orderMaterials, transaction);
     await updateMaterialsDeficit(orderMaterials, transaction);
-    await deleteCustomMaterials(orderMaterials, transaction);
+    // await deleteCustomMaterials(orderMaterials, transaction);
 
     const orderPhotos = await OrderPhotoLinks.findAll({
       where: { parentId: orderId },
@@ -421,6 +295,5 @@ module.exports = {
   getOrders,
   getOrderById,
   getOrdersWithTotal,
-  updateOrder,
   deleteOrder,
 };

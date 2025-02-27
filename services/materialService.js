@@ -1,6 +1,5 @@
 const { models } = require("../models/index");
 const { Warehouse, Materials, OrderMaterials } = models;
-const { sendLowStockNotification } = require("./notificationService");
 
 async function createCustomMaterials(material, transaction) {
   const existingMaterial = await Materials.findOne({
@@ -12,12 +11,14 @@ async function createCustomMaterials(material, transaction) {
     const oldQuantity = parseFloat(existingMaterial.quantity) || 0;
     const newQuantity = parseFloat(material.quantity) || 0;
 
-    if (oldQuantity === newQuantity) {
-      return existingMaterial;
-    }
+    // if (oldQuantity === newQuantity) {
+    //   return existingMaterial;
+    // }
 
-    const difference = newQuantity - oldQuantity;
-    existingMaterial.quantity += difference;
+    // const difference = newQuantity - oldQuantity;
+    // existingMaterial.quantity += difference;
+
+    existingMaterial.quantity += newQuantity;
 
     if (existingMaterial.quantity < 0) existingMaterial.quantity = 0;
 
@@ -71,6 +72,36 @@ async function createMissingMaterial(material, deficit, transaction) {
   }
 }
 
+async function takeAwayQuantityMaterials(orderMaterials, transaction) {
+  try {
+    for (const material of orderMaterials) {
+      const existingMaterial = await Materials.findOne({
+        where: { name: material.name },
+        transaction,
+      });
+
+      if (!existingMaterial) {
+        console.warn(`⚠️ Материал "${material.name}" не найден в базе`);
+        continue;
+      }
+
+      existingMaterial.quantity -= parseFloat(material.quantity) || 0;
+
+      if (existingMaterial.quantity <= 0) {
+        await Materials.destroy({
+          where: { name: material.name },
+          transaction,
+        });
+      } else {
+        await existingMaterial.save({ transaction });
+      }
+    }
+  } catch (error) {
+    console.error("❌ Ошибка при изменении количества материалов:", error);
+    throw error;
+  }
+}
+
 async function returnMaterialsToWarehouse(orderMaterials, transaction) {
   for (const material of orderMaterials) {
     if (material.isCreatedMenedger) continue;
@@ -92,6 +123,8 @@ async function returnMaterialsToWarehouse(orderMaterials, transaction) {
 }
 
 async function updateMaterialsDeficit(orderMaterials, transaction) {
+  await takeAwayQuantityMaterials(orderMaterials, transaction);
+
   for (const material of orderMaterials) {
     if (material.isCreatedMenedger) continue;
     if (material.deficit && material.deficit > 0) {
@@ -135,80 +168,50 @@ async function handleOrderMaterials(
   transaction,
   isUpdate = false
 ) {
-  if (!orderMaterials || orderMaterials.length === 0) return;
+  if (!orderMaterials?.length) return;
 
   if (isUpdate) {
-    const oldOrderMaterials = await OrderMaterials.findAll({
+    const oldMaterials = await OrderMaterials.findAll({
       where: { parentId },
       transaction,
     });
-    if (oldOrderMaterials.length !== orderMaterials.length) {
-      const newMaterialIds = orderMaterials.map((item) => String(item.id));
-      const deletedMaterials = oldOrderMaterials.filter(
-        (oldMat) => !newMaterialIds.includes(String(oldMat.id))
-      );
-      await returnMaterialsToWarehouse(deletedMaterials, transaction);
-      await updateMaterialsDeficit(deletedMaterials, transaction);
-    }
-    if (oldOrderMaterials.length > 0) {
-      await returnMaterialsToWarehouse(oldOrderMaterials, transaction);
-      await updateMaterialsDeficit(oldOrderMaterials, transaction);
-    }
+
+    await returnMaterialsToWarehouse(oldMaterials, transaction);
+    await updateMaterialsDeficit(oldMaterials, transaction);
+
+    await OrderMaterials.destroy({ where: { parentId }, transaction });
   }
 
   for (const material of orderMaterials) {
-    const { quantity = 1, warehouseId, ...rest } = material;
-    const parsedQuantity = parseFloat(quantity) || 0;
-    if (!material.name || parsedQuantity <= 0) continue;
+    if (!material.name || !parseFloat(material.quantity)) continue;
 
     if (material.isCreatedMenedger) {
       await createCustomMaterials(material, transaction);
       await OrderMaterials.upsert(
-        {
-          ...material,
-          quantity: parsedQuantity,
-          deficit: 0,
-          parentId,
-          warehouseId: null,
-        },
+        { ...material, deficit: 0, parentId, warehouseId: null },
         { transaction }
       );
     } else {
-      let deficit = 0;
-      if (warehouseId) {
-        const warehouseItem = await Warehouse.findByPk(warehouseId, {
-          transaction,
-        });
-        if (!warehouseItem) {
-          throw new Error(`Складський товар з ID ${warehouseId} не знайдено`);
-        }
+      const warehouseItem = await Warehouse.findByPk(material.warehouseId, {
+        transaction,
+      });
+      if (!warehouseItem)
+        throw new Error(
+          `Складський товар з ID ${material.warehouseId} не знайдено`
+        );
 
-        const availableQuantity = parseFloat(warehouseItem.quantity) || 0;
-        if (availableQuantity < 5) {
-          await sendLowStockNotification(
-            `${warehouseItem.name}${warehouseItem.length}X${warehouseItem.width}X${warehouseItem.thickness}`,
-            availableQuantity
-          );
-        }
-        if (availableQuantity >= parsedQuantity) {
-          // повністю списуємо
-          warehouseItem.quantity -= parsedQuantity;
-        } else {
-          // дефіцит
-          deficit = parsedQuantity - availableQuantity;
-          warehouseItem.quantity = 0;
-          await createMissingMaterial(warehouseItem, deficit, transaction);
-        }
-        await warehouseItem.save({ transaction });
+      let deficit = 0;
+      if (warehouseItem.quantity >= material.quantity) {
+        warehouseItem.quantity -= material.quantity;
+      } else {
+        deficit = material.quantity - warehouseItem.quantity;
+        warehouseItem.quantity = 0;
+        await createMissingMaterial(warehouseItem, deficit, transaction);
       }
+      await warehouseItem.save({ transaction });
+
       await OrderMaterials.upsert(
-        {
-          ...rest,
-          quantity: parsedQuantity,
-          deficit,
-          parentId,
-          warehouseId,
-        },
+        { ...material, deficit, parentId },
         { transaction }
       );
     }
@@ -221,4 +224,5 @@ module.exports = {
   updateMaterialsDeficit,
   createMissingMaterial,
   returnMaterialsToWarehouse,
+  takeAwayQuantityMaterials,
 };
