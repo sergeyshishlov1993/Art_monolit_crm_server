@@ -14,7 +14,18 @@ module.exports = (sequelize) => {
     warehouseId: { type: Sequelize.CHAR(36), allowNull: true },
     name: Sequelize.STRING,
     price: Sequelize.STRING,
-
+    length: {
+      type: Sequelize.FLOAT,
+      allowNull: true,
+    },
+    width: {
+      type: Sequelize.FLOAT,
+      allowNull: true,
+    },
+    thickness: {
+      type: Sequelize.FLOAT,
+      allowNull: true,
+    },
     quantity: Sequelize.FLOAT,
     deficit: {
       type: Sequelize.FLOAT,

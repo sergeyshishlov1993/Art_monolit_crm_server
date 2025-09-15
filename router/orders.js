@@ -528,26 +528,6 @@ router.post("/create", upload.array("photos"), async (req, res) => {
   const transaction = await Orders.sequelize.transaction();
 
   try {
-    // const lastOrder = await Orders.findOne({
-    //   where: { storeAddress: orderData.storeAddress },
-    //   order: [["createdAt", "DESC"]],
-    //   transaction, // Читаем в той же транзакции
-    // });
-
-    // console.log("lastOrder", lastOrder);
-
-    // let lastNumber = 0;
-    // if (lastOrder && lastOrder.order_number) {
-    //   const match = lastOrder.order_number.match(/\d+$/);
-    //   lastNumber = match ? parseInt(match[0], 10) : 0;
-    // }
-
-    // const storePrefix = orderData.storeAddress
-    //   ? orderData.store.slice(0, 2).toLowerCase()
-    //   : "xx";
-    // orderData.order_number = `${storePrefix}-${lastNumber + 1}`;
-
-    // console.log("✅ Сгенерирован order_number:", orderData.order_number);
 
     const order = await Orders.create(orderData, { transaction });
 

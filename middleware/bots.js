@@ -5,15 +5,24 @@ const botStatus = new TelegramBot(process.env.BOT_STATUS_TOKEN, {
 });
 const statusChatIds = new Set();
 
+botStatus.on('polling_error', (error) => {
+
+});
+
+
 const botOrders = new TelegramBot(process.env.BOT_ORDERS_TOKEN, {
   polling: true,
 });
-const orderChatIds = new Set();
+const orderChatIds = new Set();botOrders.on('polling_error', (error) => {
+});
 
 const botWarehouse = new TelegramBot(process.env.BOT_WAREHOUSE_TOKEN, {
   polling: true,
 });
 const warehouseChatIds = new Set();
+
+botWarehouse.on('polling_error', (error) => {
+});
 
 module.exports = {
   botStatus,

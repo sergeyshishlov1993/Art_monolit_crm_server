@@ -1,9 +1,11 @@
 const { models } = require("../models/index");
 const { OrderDeads, OrderMaterials, OrderWorks, OrderServices } = models;
 
+
 const {
   returnMaterialsToWarehouse,
-  updateMaterialsDeficit,
+  reverseMaterialDeficit,
+
 } = require("./materialService");
 
 async function handleOrderDeads(orderDeads, parentId, transaction) {
@@ -30,6 +32,7 @@ async function handleOrderWorks(orderWorks, parentId, transaction) {
   }
 }
 
+
 async function deleteRelatedData(parentId, transaction) {
   const orderMaterials = await OrderMaterials.findAll({
     where: { parentId: parentId },
@@ -37,8 +40,11 @@ async function deleteRelatedData(parentId, transaction) {
   });
 
   await OrderDeads.destroy({ where: { parentId }, transaction });
+
+
   await returnMaterialsToWarehouse(orderMaterials, transaction);
-  await updateMaterialsDeficit(orderMaterials, transaction);
+  await reverseMaterialDeficit(orderMaterials, transaction);
+
   await OrderMaterials.destroy({ where: { parentId }, transaction });
   await OrderWorks.destroy({ where: { parentId }, transaction });
   await OrderServices.destroy({ where: { parentId }, transaction });

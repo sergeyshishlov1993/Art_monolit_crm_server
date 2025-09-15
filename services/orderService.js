@@ -1,4 +1,3 @@
-// services/orderService.js
 const { models } = require("../models/index");
 const {
   Orders,
@@ -10,13 +9,12 @@ const {
   OrderPhotoLinks,
 } = models;
 const {
-  createMissingMaterial,
   handleOrderMaterials,
-  returnMaterialsToWarehouse,
-  updateMaterialsDeficit,
+  reverseMaterialDeficit,
   deleteCustomMaterials,
+  returnMaterialsToWarehouse,
+  reverseCustomMaterial
 } = require("./materialService");
-
 const {
   handleOrderDeads,
   handleOrderServices,
@@ -24,8 +22,7 @@ const {
 } = require("./otherInfoOrder");
 const { sendOrderUpdateMessage } = require("./notificationService");
 const { handleOrderPhotos, deleteFileFromS3 } = require("./photoService");
-const { selectStatus, updateOrderStatus } = require("./statusService");
-const { v4: uuidv4 } = require("uuid");
+const { selectStatus } = require("./statusService");
 const { Op } = require("sequelize");
 
 async function createOrder(
@@ -41,6 +38,7 @@ async function createOrder(
     const lastOrder = await Orders.findOne({
       where: { storeAddress: orderData.storeAddress },
       order: [["createdAt", "DESC"]],
+      lock: transaction.LOCK.UPDATE,
       transaction,
     });
 
@@ -61,27 +59,17 @@ async function createOrder(
       { transaction }
     );
 
-    await handleOrderDeads(orderDeads, order.id, transaction);
-    await handleOrderMaterials(orderMaterials, order.id, transaction, false);
-    await handleOrderWorks(orderWorks, order.id, transaction);
-    await handleOrderServices(orderServices, order.id, transaction);
-
-    for (const material of orderMaterials) {
-      if (material.deficit > 0) {
-        await createMissingMaterial(material, material.deficit, transaction);
-      }
-    }
-
-    if (
-      rowsPhotos &&
-      (rowsPhotos.carvings?.length > 0 || rowsPhotos.artistic?.length > 0)
-    ) {
-      await handleOrderPhotos(
-        [...(rowsPhotos.carvings || []), ...(rowsPhotos.artistic || [])],
+    await Promise.all([
+      handleOrderDeads(orderDeads, order.id, transaction),
+      handleOrderMaterials(orderMaterials, order.id, transaction, false),
+      handleOrderWorks(orderWorks, order.id, transaction),
+      handleOrderServices(orderServices, order.id, transaction),
+      handleOrderPhotos(
+        [...(rowsPhotos?.carvings || []), ...(rowsPhotos?.artistic || [])],
         order.id,
         transaction
-      );
-    }
+      ),
+    ]);
 
     await transaction.commit();
 
@@ -91,52 +79,37 @@ async function createOrder(
     👤 <b>Заказчик:</b> ${order.first_name} ${order.second_name}\n
     📞 <b>Телефон:</b> ${order.phone}\n
     🕒 <b>Дата изменения:</b> ${new Date().toLocaleString("ru-RU", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })}\n
-    🔄 <b>Новий статус:</b> ${selectStatus(order.status)}\n
+  year: "numeric", month: "long", day: "numeric",
+  hour: "2-digit", minute: "2-digit",
+})}\n
+    🔄 <b>Новый статус:</b> ${selectStatus(order.status)}\n
     💳 <b>Предоплата:</b> ${order.prepayment}₴\n
     💵 <b>К оплате:</b> ${order.totalPrice}₴\n
     💻 <b>Источник:</b> ${order.source}\n
-
-        `;
+    `;
     sendOrderUpdateMessage(message, "orders");
     return { success: true, order };
   } catch (error) {
     await transaction.rollback();
-    console.error("Помилка при створенні замовлення:", error);
-
+    console.error("Ошибка при создании заказа:", error);
     if (rowsPhotos) {
       const allPhotos = [
         ...(rowsPhotos.carvings || []),
         ...(rowsPhotos.artistic || []),
       ];
-
       await Promise.all(
         allPhotos.map(async (photo) => {
-          await deleteFileFromS3(photo.key);
+          if (photo.key) await deleteFileFromS3(photo.key);
         })
       );
     }
-
     throw error;
   }
 }
+
 async function getOrders(query) {
   try {
-    const {
-      status,
-      startDate,
-      endDate,
-      search,
-      storeAddress,
-      page = 1,
-      per_page = 10,
-      source,
-    } = query;
+    const { status, startDate, endDate, search, storeAddress, page = 1, per_page = 10, source } = query;
     const where = {};
     const limit = parseInt(per_page) || 10;
     const currentPage = Math.max(1, parseInt(page) || 1);
@@ -147,15 +120,8 @@ async function getOrders(query) {
       const end = new Date(`${endDate}T23:59:59.999Z`);
       where.createdAt = { [Op.between]: [start, end] };
     }
-
-    if (status && status !== "all") {
-      where.status = status;
-    }
-
-    if (source && source !== "all") {
-      where.source = source;
-    }
-
+    if (status && status !== "all") where.status = status;
+    if (source && source !== "all") where.source = source;
     if (search) {
       where[Op.or] = [
         { order_number: { [Op.like]: `%${search}%` } },
@@ -164,22 +130,12 @@ async function getOrders(query) {
         { second_name: { [Op.like]: `%${search}%` } },
       ];
     }
-
-    if (storeAddress && storeAddress !== "Все магазины") {
-      where.storeAddress = storeAddress;
-    }
+    if (storeAddress && storeAddress !== "Все магазины") where.storeAddress = storeAddress;
 
     const totalOrders = await Orders.count({ where });
     const orders = await Orders.findAll({
       where,
-      include: [
-        OrderMaterials,
-        OrderWorks,
-        OrderServices,
-        OrderStatuses,
-        OrderDeads,
-        OrderPhotoLinks,
-      ],
+      include: [ OrderMaterials, OrderWorks, OrderServices, OrderStatuses, OrderDeads, OrderPhotoLinks ],
       order: [["createdAt", "DESC"]],
       limit,
       offset,
@@ -201,14 +157,7 @@ async function getOrderById(orderId) {
   try {
     return await Orders.findOne({
       where: { id: orderId },
-      include: [
-        OrderMaterials,
-        OrderWorks,
-        OrderServices,
-        OrderStatuses,
-        OrderDeads,
-        OrderPhotoLinks,
-      ],
+      include: [ OrderMaterials, OrderWorks, OrderServices, OrderStatuses, OrderDeads, OrderPhotoLinks ],
     });
   } catch (error) {
     throw error;
@@ -218,31 +167,18 @@ async function getOrderById(orderId) {
 async function getOrdersWithTotal(query) {
   try {
     const { startDate, endDate, storeAddress, source } = query;
-
     const where = {};
-
     if (startDate && endDate) {
       const start = new Date(`${startDate}T00:00:00.000Z`);
       const end = new Date(`${endDate}T23:59:59.999Z`);
       where.createdAt = { [Op.between]: [start, end] };
     }
-
-    if (storeAddress && storeAddress !== "Все магазины") {
-      where.storeAddress = storeAddress;
-    }
-
-    if (source && source !== "all") {
-      where.source = source;
-    }
+    if (storeAddress && storeAddress !== "Все магазины") where.storeAddress = storeAddress;
+    if (source && source !== "all") where.source = source;
 
     const totalSum = await Orders.sum("totalPrice", { where });
-
     const totalOrders = await Orders.count({ where });
-
-    return {
-      totalOrders,
-      totalSum: totalSum || 0,
-    };
+    return { totalOrders, totalSum: totalSum || 0 };
   } catch (error) {
     console.error("Ошибка в getOrdersWithTotal:", error);
     throw error;
@@ -260,29 +196,27 @@ async function deleteOrder(orderId) {
       transaction,
     });
 
-    await returnMaterialsToWarehouse(orderMaterials, transaction);
-    await updateMaterialsDeficit(orderMaterials, transaction);
-    // await deleteCustomMaterials(orderMaterials, transaction);
+    if (order.status !== 'completed') {
+      await returnMaterialsToWarehouse(orderMaterials, transaction);
+      await reverseMaterialDeficit(orderMaterials, transaction);
+      await reverseCustomMaterial(orderMaterials, transaction);
+    }
+    await deleteCustomMaterials(orderMaterials, orderId, transaction);
 
     const orderPhotos = await OrderPhotoLinks.findAll({
       where: { parentId: orderId },
       transaction,
     });
-
     await Promise.all(
       orderPhotos.map(async (photo) => {
-        await deleteFileFromS3(photo.fileKey);
+        if (photo.fileKey) await deleteFileFromS3(photo.fileKey);
       })
     );
-
-    await OrderPhotoLinks.destroy({
-      where: { parentId: orderId },
-      transaction,
-    });
-
+    await OrderPhotoLinks.destroy({ where: { parentId: orderId }, transaction });
     await Orders.destroy({ where: { id: orderId }, transaction });
-    sendOrderUpdateMessage(`🗑️ Заказ #${order.name} удален`, "orders");
+
     await transaction.commit();
+    sendOrderUpdateMessage(`🗑️ Заказ #${order.name} удален`, "orders");
     return { success: true, message: "Заказ успешно удален" };
   } catch (error) {
     await transaction.rollback();
@@ -297,3 +231,4 @@ module.exports = {
   getOrdersWithTotal,
   deleteOrder,
 };
+
