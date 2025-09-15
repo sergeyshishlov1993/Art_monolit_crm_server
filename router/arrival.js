@@ -4,6 +4,7 @@ const router = Router();
 const { models } = require("../models/index");
 const { Arrival, Warehouse, Defective } = models;
 const { Op } = require("sequelize");
+const { v4: uuidv4 } = require('uuid');
 
 router.get("/", async (req, res) => {
   const { search } = req.query;
@@ -27,7 +28,16 @@ router.post("/create", async (req, res) => {
   const { arrivalData } = req.body;
   const transaction = await Arrival.sequelize.transaction();
   try {
-    const materials = await Arrival.create(arrivalData, { transaction });
+
+    const generatedMaterialId = uuidv4();
+
+    const dataToCreate = {
+      ...arrivalData,
+      materialId: generatedMaterialId
+    };
+
+    const materials = await Arrival.create(dataToCreate, { transaction });
+
     await transaction.commit();
     res.status(200).json({
       message: "Успешно добавленно",
@@ -44,6 +54,8 @@ router.post("/transfer-to-warehouse", async (req, res) => {
   const transaction = await Arrival.sequelize.transaction();
   try {
     const arrivals = await Arrival.findAll();
+
+
 
     if (arrivals.length === 0) {
       return res.status(404).json({ message: "Нет данных для переноса" });
@@ -108,7 +120,6 @@ router.post("/transfer-to-warehouse", async (req, res) => {
       }
     }
 
-    await Arrival.destroy({ where: {}, transaction });
 
     await transaction.commit();
 
